@@ -1,42 +1,58 @@
 #!/usr/bin/env bash
-# Setup Imagegen Studio (ban standalone). Chay 1 lan. Tu cai thu con thieu.
+# Setup Imagegen Studio (ban standalone). Chay 1 lan.
+# KHONG can sudo: cai vao ~/.local. Cai gi da co san thi bo qua.
 set -e
 cd "$(dirname "$0")"
-HERE="$(pwd)"
 
-SUDO=""
-[ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1 && SUDO="sudo"
+BIN="$HOME/.local/bin"; mkdir -p "$BIN"
+export PATH="$BIN:$PATH"
+# nho PATH cho lan sau
+grep -qs '.local/bin' "$HOME/.bashrc" 2>/dev/null \
+  || echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
 
-pm_install() {  # pm_install <pkg...> qua package manager he thong
-  if   command -v apt-get >/dev/null 2>&1; then $SUDO apt-get update -y && $SUDO apt-get install -y "$@"
-  elif command -v dnf     >/dev/null 2>&1; then $SUDO dnf install -y "$@"
-  elif command -v pacman  >/dev/null 2>&1; then $SUDO pacman -S --noconfirm "$@"
-  elif command -v zypper  >/dev/null 2>&1; then $SUDO zypper install -y "$@"
-  else echo "!! Khong ro package manager — cai tay: $*"; return 1; fi
-}
-
-npm_g() {  # cai npm global, thu sudo neu bi tu choi quyen
-  npm install -g "$@" 2>/dev/null || $SUDO npm install -g "$@"
+dl() {  # dl <url> -> stdout (curl hoac wget)
+  if   command -v curl >/dev/null 2>&1; then curl -fsSL "$1"
+  elif command -v wget >/dev/null 2>&1; then wget -qO- "$1"
+  else echo "!! Can curl hoac wget de tai. Cai 1 trong 2 roi chay lai." >&2; return 1; fi
 }
 
 echo "== 1. python3 =="
-command -v python3 >/dev/null 2>&1 || pm_install python3
-python3 --version
+if command -v python3 >/dev/null 2>&1; then
+  echo "  da co: $(python3 --version 2>&1)"
+else
+  echo "!! May khong co python3 va khong the tu cai (khong sudo)."
+  echo "   Nho quan tri vien cai python3, roi chay lai ./setup.sh"
+  exit 1
+fi
 
 echo "== 2. node + npm (can cho claude & codex) =="
-command -v npm >/dev/null 2>&1 || pm_install nodejs npm
-npm --version
+if command -v npm >/dev/null 2>&1; then
+  echo "  da co: npm $(npm --version)"
+else
+  echo "  chua co -> tai node ban prebuilt vao ~/.local (khong can sudo)"
+  NODE_VER="v22.11.0"
+  case "$(uname -m)" in
+    x86_64)        A=x64 ;;
+    aarch64|arm64) A=arm64 ;;
+    *) echo "!! CPU $(uname -m) khong ro ban node — cai node tay roi chay lai."; exit 1 ;;
+  esac
+  dl "https://nodejs.org/dist/$NODE_VER/node-$NODE_VER-linux-$A.tar.xz" \
+    | tar -xJ -C "$HOME/.local" --strip-components=1
+  echo "  node $(node --version) da cai vao ~/.local"
+fi
+# global install -> vao ~/.local (khong dung sudo)
+npm config set prefix "$HOME/.local" >/dev/null 2>&1 || true
 
 echo "== 3. claude (Claude Code CLI) =="
 command -v claude >/dev/null 2>&1 && echo "  da co: $(command -v claude)" \
-  || npm_g @anthropic-ai/claude-code
+  || npm install -g @anthropic-ai/claude-code
 
 echo "== 4. codex (ChatGPT backend) =="
 command -v codex >/dev/null 2>&1 && echo "  da co: $(command -v codex)" \
-  || npm_g @openai/codex
+  || npm install -g @openai/codex
 
 echo "== 5. aiohttp (server Studio) =="
-python3 -c "import aiohttp" 2>/dev/null && echo "  aiohttp: da co" \
+python3 -c "import aiohttp" 2>/dev/null && echo "  da co" \
   || python3 -m pip install --user --break-system-packages "aiohttp>=3.9"
 
 echo "== 6. Thu muc output/refs (o HOME, tranh o NTFS hay xoa) =="

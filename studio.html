@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Imagegen Studio</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
+<style>
+  :root { --bg:#0f1115; --panel:#171a21; --line:#262b36; --fg:#e6e9ef; --mut:#8b93a3; --accent:#6ea8fe; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
+    font:14px/1.4 system-ui,Segoe UI,Roboto,sans-serif; overflow:hidden; }
+  #app { display:flex; flex-direction:column; height:100vh; }
+
+  #top { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; }
+  #bar { display:flex; align-items:center; gap:12px; padding:8px 12px;
+    border-bottom:1px solid var(--line); background:var(--panel); }
+  #bar h1 { font-size:14px; margin:0; font-weight:600; letter-spacing:.3px; }
+  #bar .sp { flex:1; }
+  button { background:#222835; color:var(--fg); border:1px solid var(--line);
+    border-radius:7px; padding:6px 12px; cursor:pointer; font-size:13px; }
+  button:hover { border-color:var(--accent); color:var(--accent); }
+  #refs { display:flex; gap:6px; overflow-x:auto; max-width:46vw; align-items:center; }
+  #refs img { height:34px; width:34px; object-fit:cover; border-radius:5px; border:1px solid var(--line); }
+  #refs .chip { flex:none; font-size:12px; color:var(--mut); background:#20262f;
+    border:1px solid var(--line); border-radius:12px; padding:3px 9px; white-space:nowrap; }
+  #toast { position:fixed; bottom:14px; left:50%; transform:translateX(-50%);
+    background:#1f2733; color:var(--fg); border:1px solid var(--accent); border-radius:8px;
+    padding:8px 16px; font-size:13px; opacity:0; transition:opacity .2s; pointer-events:none; z-index:20; }
+  #toast.show { opacity:1; }
+
+  #gallery { flex:1; overflow-y:auto; padding:14px; display:grid; gap:12px;
+    grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); align-content:start; }
+  #gallery a { display:block; border-radius:10px; overflow:hidden; border:1px solid var(--line);
+    background:var(--panel); }
+  #gallery img { width:100%; display:block; }
+  #empty { color:var(--mut); grid-column:1/-1; text-align:center; padding:60px 0; }
+  #drop { position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+    background:rgba(110,168,254,.12); border:3px dashed var(--accent); z-index:5;
+    font-size:18px; color:var(--accent); pointer-events:none; }
+  #top.drag #drop { display:flex; }
+
+  #divider { height:6px; background:var(--line); cursor:row-resize; flex:0 0 auto; }
+  #term { flex:0 0 44vh; min-height:120px; background:#000; padding:6px 8px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="top">
+    <div id="bar">
+      <h1>🎨 Imagegen Studio</h1>
+      <div id="refs" title="Anh reference da keo vao"></div>
+      <div class="sp"></div>
+      <span id="cnt" style="color:var(--mut)"></span>
+      <button id="new">＋ New (xoa gallery)</button>
+    </div>
+    <div id="gallery"><div id="empty">Keo folder / anh vao day de lam reference.<br>Anh gen xong se hien o day.</div></div>
+    <div id="drop">Tha ra de nap reference…</div>
+  </div>
+  <div id="divider"></div>
+  <div id="term"></div>
+</div>
+<div id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+<script>
+// ---------- Terminal (PTY qua WebSocket) ----------
+const term = new Terminal({ fontSize:13, cursorBlink:true, theme:{background:'#000'} });
+const fit = new FitAddon.FitAddon();
+term.loadAddon(fit);
+term.open(document.getElementById('term'));
+fit.fit();
+
+const ws = new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/pty');
+ws.binaryType = 'arraybuffer';
+const enc = new TextEncoder();
+function sendResize(){ try { ws.send(JSON.stringify({resize:[term.cols, term.rows]})); } catch(e){} }
+ws.onopen = () => { fit.fit(); sendResize(); term.focus(); };
+ws.onmessage = e => term.write(new Uint8Array(e.data));
+ws.onclose = () => term.write('\r\n[studio] terminal da dong.\r\n');
+term.onData(d => { if (ws.readyState===1) ws.send(enc.encode(d)); });
+new ResizeObserver(() => { fit.fit(); sendResize(); }).observe(document.getElementById('term'));
+
+// ---------- Divider keo doi cao terminal ----------
+const divider = document.getElementById('divider'), termEl = document.getElementById('term');
+divider.onmousedown = e => {
+  e.preventDefault();
+  const move = ev => { const h = Math.max(120, window.innerHeight - ev.clientY);
+    termEl.style.flexBasis = h+'px'; };
+  const up = () => { document.removeEventListener('mousemove',move); document.removeEventListener('mouseup',up); };
+  document.addEventListener('mousemove',move); document.addEventListener('mouseup',up);
+};
+
+// ---------- Gallery (poll OUT, "/new" xoa view) ----------
+const gallery = document.getElementById('gallery'), empty = document.getElementById('empty'),
+      cnt = document.getElementById('cnt');
+let clearedAt = parseFloat(localStorage.getItem('clearedAt') || '0');
+const shown = new Set();
+
+async function poll(){
+  try {
+    const list = await (await fetch('/gallery')).json();
+    // moi nhat truoc -> render nguoc de prepend giu thu tu
+    for (const it of list.slice().reverse()) {
+      if (it.mtime <= clearedAt || shown.has(it.url)) continue;
+      shown.add(it.url);
+      empty.style.display = 'none';
+      const a = document.createElement('a');
+      a.href = it.url; a.target = '_blank'; a.title = it.name;
+      const img = document.createElement('img'); img.src = it.url; img.loading = 'lazy';
+      a.appendChild(img); gallery.insertBefore(a, gallery.firstChild);
+    }
+    cnt.textContent = shown.size ? shown.size + ' anh' : '';
+  } catch(e){}
+}
+poll(); setInterval(poll, 2000);
+
+document.getElementById('new').onclick = () => {
+  clearedAt = Date.now()/1000;
+  localStorage.setItem('clearedAt', clearedAt);
+  shown.clear();
+  [...gallery.querySelectorAll('a')].forEach(a => a.remove());
+  empty.style.display = ''; cnt.textContent = '';
+};
+
+// ---------- Keo-tha reference (anh + folder) ----------
+const topPane = document.getElementById('top'), refsBar = document.getElementById('refs');
+const isImg = n => /\.(png|jpe?g|webp|gif)$/i.test(n);
+// nhan tha tren TOAN cua so (ke ca terminal). capture=true de chan truoc xterm,
+// khong thi trinh duyet mo anh ra tab moi.
+window.addEventListener('dragover', e => { e.preventDefault(); topPane.classList.add('drag'); }, true);
+window.addEventListener('dragleave', e => { if (e.relatedTarget===null) topPane.classList.remove('drag'); }, true);
+
+function walkEntry(entry, out){
+  return new Promise(res => {
+    if (entry.isFile) entry.file(f => { if (isImg(f.name)) out.push(f); res(); });
+    else if (entry.isDirectory) {
+      const rd = entry.createReader(), all = [];
+      const batch = () => rd.readEntries(async es => {
+        if (!es.length) { await Promise.all(all.map(e => walkEntry(e, out))); res(); return; }
+        all.push(...es); batch();
+      });
+      batch();
+    } else res();
+  });
+}
+const readDataURL = f => new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(f); });
+const entryFile = entry => new Promise(res => entry.file(res, () => res(null)));
+let toastT; const toastEl = document.getElementById('toast');
+function toast(msg){ toastEl.textContent = msg; toastEl.classList.add('show');
+  clearTimeout(toastT); toastT = setTimeout(() => toastEl.classList.remove('show'), 2600); }
+function chip(label, path){ const c = document.createElement('span'); c.className = 'chip';
+  c.textContent = label; c.title = path; refsBar.appendChild(c); }
+async function uploadOne(f, subdir){
+  const data = await readDataURL(f);
+  const resp = await fetch('/upload', {method:'POST', body: JSON.stringify({name:f.name, data, subdir: subdir||''})});
+  if (!resp.ok) throw new Error(f.name + ' -> HTTP ' + resp.status);
+  return resp.json();  // {path, dir}
+}
+
+window.addEventListener('drop', async e => {
+  e.preventDefault();
+  topPane.classList.remove('drag');
+  const inserts = [];  // {path, label} - folder => 1 duong dan folder, anh le => path anh
+  try {
+    // A) keo tu noi co duong dan local that (uri-list) -> chen thang, giu nguyen folder.
+    const uris = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain') || '';
+    const localPaths = uris.split(/\r?\n/).map(s => s.trim()).filter(s => s.startsWith('file://'))
+      .map(u => { try { return decodeURIComponent(new URL(u).pathname); } catch(_) { return ''; } }).filter(Boolean);
+    if (localPaths.length) {
+      for (const p of localPaths) inserts.push({path: p, label: p.split('/').filter(Boolean).pop()});
+    } else {
+      // B) Linux/web -> chi doc duoc noi dung. Folder: copy vao refs/<ten>/ va chen 1 duong dan folder.
+      const entries = e.dataTransfer.items
+        ? [...e.dataTransfer.items].map(i => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean) : [];
+      if (entries.length) {
+        for (const entry of entries) {
+          if (entry.isDirectory) {
+            const files = []; await walkEntry(entry, files);
+            if (!files.length) continue;
+            let dir = null;
+            for (const f of files) dir = (await uploadOne(f, entry.name)).dir;
+            inserts.push({path: dir, label: '📁 ' + entry.name + ' (' + files.length + ')'});
+          } else {
+            const f = await entryFile(entry);
+            if (f && isImg(f.name)) inserts.push({path: (await uploadOne(f)).path, label: f.name});
+          }
+        }
+      } else {  // fallback: files phang (khong co info folder)
+        for (const f of e.dataTransfer.files) if (isImg(f.name))
+          inserts.push({path: (await uploadOne(f)).path, label: f.name});
+      }
+    }
+  } catch(err) { toast('Loi nap anh: ' + err.message); return; }
+
+  if (!inserts.length) { toast('Khong tim thay anh trong muc da tha'); return; }
+  for (const it of inserts) chip(it.label, it.path);
+  // go duong dan thang vao o nhap cua terminal (Claude nhin thay)
+  if (ws.readyState===1) ws.send(enc.encode(' ' + inserts.map(i => i.path).join(' ') + ' '));
+  toast('Da nap ' + inserts.length + ' muc vao Claude');
+  term.focus();
+}, true);
+</script>
+</body>
+</html>

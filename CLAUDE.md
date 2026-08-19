@@ -71,8 +71,8 @@ CLI chỉ dùng thư viện chuẩn Python — không cần cài gì.
 
 ## Backend & auth
 - Dùng **codex backend** (session ChatGPT đã login). File auth: `~/.codex/auth.json` (dùng chung toàn máy).
-- Token tự refresh mỗi 20 phút qua cron (xem `crontab -l`). `refresh_token.py` lo việc này.
-- Nếu gặp `HTTP 401` / "token refresh failed" hoàn toàn → bảo người dùng chạy: `codex login`.
+- CLI **tự refresh access token mỗi lần gen** (dùng `refresh_token` trong `auth.json`) — không cần cron/vòng nền.
+- Chỉ khi `refresh_token` **chết hẳn** CLI mới báo `run codex login again` / `token refresh failed`. Lúc đó bảo người dùng bấm chạy **`./login.sh`** (nó check codex đã cài + chạy `codex login`), rồi gen lại.
 - Ảnh có thể ra 1254×1254 thay vì 2048 → giới hạn subscription, không đổi được.
 
 ## Quy trình làm việc với người dùng

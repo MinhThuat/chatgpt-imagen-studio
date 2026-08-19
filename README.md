@@ -2,22 +2,16 @@
 
 Gen ảnh mockup sản phẩm hàng loạt bằng AI (ChatGPT image gen), UI web + terminal Claude. Nền tảng **Linux**.
 
-## Cài (chạy 1 lần)
+## Dùng (bấm 1 cái)
 
 ```bash
 git clone <URL-REPO> imagegen-studio
 cd imagegen-studio
-./setup.sh          # cài aiohttp, tạo ~/imagegen_studio/{out,refs}
-codex login         # nếu chưa có ~/.codex/auth.json
+./start.sh          # lần đầu tự setup, sau đó tự mở http://127.0.0.1:8760
 ```
 
-Cần sẵn: `python3`, `claude` (Claude Code CLI), và session ChatGPT đã login qua `codex`.
-
-## Chạy
-
-```bash
-./Studio.sh         # mở http://127.0.0.1:8760
-```
+`start.sh` tự cài aiohttp + tạo thư mục nếu chưa có, rồi mở Studio.
+Cần sẵn: `python3`, `claude` (Claude Code CLI), và session ChatGPT đã login: `codex login`.
 
 ## Tự cập nhật
 

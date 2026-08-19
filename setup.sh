@@ -20,9 +20,16 @@ echo "== 1. python3 =="
 if command -v python3 >/dev/null 2>&1; then
   echo "  da co: $(python3 --version 2>&1)"
 else
-  echo "!! May khong co python3 va khong the tu cai (khong sudo)."
-  echo "   Nho quan tri vien cai python3, roi chay lai ./setup.sh"
-  exit 1
+  echo "  chua co -> tai python ban prebuilt (standalone) vao ~/.local (khong can sudo)"
+  PY_TAG="20241206"; PY_VER="3.12.8"
+  case "$(uname -m)" in
+    x86_64)        PA=x86_64 ;;
+    aarch64|arm64) PA=aarch64 ;;
+    *) echo "!! CPU $(uname -m) khong ro ban python — cai python3 tay roi chay lai."; exit 1 ;;
+  esac
+  dl "https://github.com/astral-sh/python-build-standalone/releases/download/$PY_TAG/cpython-$PY_VER+$PY_TAG-$PA-unknown-linux-gnu-install_only.tar.gz" \
+    | tar -xz -C "$HOME/.local" --strip-components=1
+  echo "  python $(python3 --version 2>&1) da cai vao ~/.local"
 fi
 
 echo "== 2. node + npm (can cho claude & codex) =="

@@ -10,10 +10,10 @@ cd imagegen-studio
 ./start.sh          # lần đầu tự setup, sau đó tự mở http://127.0.0.1:8760
 ```
 
-`start.sh` lần đầu chạy `setup.sh`: tự cài **node/npm, claude, codex, aiohttp** vào `~/.local`
-(**không cần sudo**), cái nào có sẵn thì bỏ qua. Rồi mở Studio.
+`start.sh` lần đầu chạy `setup.sh`: tự cài **python3, node/npm, claude, codex, aiohttp** vào `~/.local`
+(**không cần sudo** — dùng bản prebuilt standalone), cái nào có sẵn thì bỏ qua. Rồi mở Studio.
 
-Chỉ cần máy có sẵn **`python3`** (hầu như Linux nào cũng có; không có thì nhờ admin cài — không tự cài được vì không sudo).
+Máy chỉ cần có `git` + `curl` (hoặc `wget`) và kết nối mạng.
 Sau khi cài xong, đăng nhập ChatGPT một lần: `codex login` (hoặc `./login.sh`).
 
 ## Tự cập nhật

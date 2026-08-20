@@ -254,19 +254,27 @@ window.addEventListener('drop', async e => {
 }, true);
 
 // ---------- Paste anh (Ctrl+V) — vd copy anh tren web roi dan vao ----------
-// "Copy image" tren trang web dat binary anh vao clipboard -> getAsFile() lay duoc.
-// (Rieng "Copy image address" chi co URL, khong co binary -> khong ho tro, xem note.)
-window.addEventListener('paste', async e => {
-  const imgs = [...(e.clipboardData?.items || [])]
-    .filter(it => it.kind === 'file' && it.type.startsWith('image/'))
-    .map(it => it.getAsFile()).filter(Boolean);
-  if (!imgs.length) return;                 // khong phai anh -> de terminal paste text binh thuong
-  e.preventDefault(); e.stopPropagation();
+// xterm nuot su kien 'paste' khi terminal dang focus (preventDefault Ctrl+V), nen
+// bat o keydown va doc clipboard truc tiep qua async Clipboard API -> chay du
+// terminal HAY gallery dang focus. "Copy image" tren web dat binary anh vao clipboard.
+// (Rieng "Copy image address" chi co URL, khong co binary -> khong ho tro.)
+window.addEventListener('keydown', async e => {
+  if (!((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'v')) return;
+  if (!navigator.clipboard || !navigator.clipboard.read) return;   // trinh duyet cu -> bo qua
+  let items;
+  try { items = await navigator.clipboard.read(); }
+  catch(_) { return; }                      // khong co quyen / clipboard rong
+  const blobs = [];
+  for (const it of items) {
+    const t = it.types.find(x => x.startsWith('image/'));
+    if (t) blobs.push(await it.getType(t));
+  }
+  if (!blobs.length) return;                 // clipboard chi co text -> de terminal paste binh thuong
   const inserts = [];
   try {
-    for (const f of imgs) {
-      const name = f.name && /\.\w+$/.test(f.name) ? f.name : 'paste.' + (f.type.split('/')[1] || 'png');
-      inserts.push({path: (await uploadOne(new File([f], name, {type:f.type}))).path, label: name});
+    for (const blob of blobs) {
+      const name = 'paste.' + (blob.type.split('/')[1] || 'png');
+      inserts.push({path: (await uploadOne(new File([blob], name, {type:blob.type}))).path, label: name});
     }
   } catch(err) { toast('Loi dan anh: ' + err.message); return; }
   for (const it of inserts) chip(it.label, it.path);

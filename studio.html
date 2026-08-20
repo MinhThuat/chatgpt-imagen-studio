@@ -84,11 +84,14 @@ fit.fit();
 const ws = new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/pty');
 ws.binaryType = 'arraybuffer';
 const enc = new TextEncoder();
+let lastPasteLen = 0;   // do dai chuoi duong dan vua chen -> Ctrl+Z xoa dung bay nhieu ky tu
+let deletedCount = 0;   // so anh da chuyen vao thung rac trong phien -> Ctrl+Z khoi phuc
 function sendResize(){ try { ws.send(JSON.stringify({resize:[term.cols, term.rows]})); } catch(e){} }
 ws.onopen = () => { fit.fit(); sendResize(); term.focus(); };
 ws.onmessage = e => term.write(new Uint8Array(e.data));
 ws.onclose = () => term.write('\r\n[studio] terminal da dong.\r\n');
-term.onData(d => { if (ws.readyState===1) ws.send(enc.encode(d)); });
+term.onData(d => { lastPasteLen = 0;   // go phim khac -> huy bo dem undo-paste
+  if (ws.readyState===1) ws.send(enc.encode(d)); });
 new ResizeObserver(() => { fit.fit(); sendResize(); }).observe(document.getElementById('term'));
 
 // ---------- Divider keo doi cao terminal ----------
@@ -127,10 +130,10 @@ async function poll(){
         if (!confirm('Xoa han file ' + it.name + ' ?')) return;
         fetch('/delete?p=' + enc).then(r => {
           if (!r.ok) { toast('Xoa that bai: ' + it.name); return; }
-          a.remove(); shown.delete(it.url);
+          a.remove(); shown.delete(it.url); deletedCount++;
           cnt.textContent = shown.size ? shown.size + ' anh' : '';
           if (!shown.size) empty.style.display = '';
-          toast('Da xoa ' + it.name);
+          toast('Da xoa ' + it.name + ' — Ctrl+Z de khoi phuc');
         });
       };
       a.appendChild(img); a.appendChild(del);
@@ -248,7 +251,8 @@ window.addEventListener('drop', async e => {
   if (!inserts.length) { toast('Khong tim thay anh trong muc da tha'); return; }
   for (const it of inserts) chip(it.label, it.path);
   // go duong dan thang vao o nhap cua terminal (Claude nhin thay)
-  if (ws.readyState===1) ws.send(enc.encode(' ' + inserts.map(i => i.path).join(' ') + ' '));
+  const injected = ' ' + inserts.map(i => i.path).join(' ') + ' ';
+  if (ws.readyState===1) { ws.send(enc.encode(injected)); lastPasteLen = injected.length; }
   toast('Da nap ' + inserts.length + ' muc vao Claude');
   term.focus();
 }, true);
@@ -278,9 +282,30 @@ window.addEventListener('keydown', async e => {
     }
   } catch(err) { toast('Loi dan anh: ' + err.message); return; }
   for (const it of inserts) chip(it.label, it.path);
-  if (ws.readyState===1) ws.send(enc.encode(' ' + inserts.map(i => i.path).join(' ') + ' '));
+  const injected = ' ' + inserts.map(i => i.path).join(' ') + ' ';
+  if (ws.readyState===1) { ws.send(enc.encode(injected)); lastPasteLen = injected.length; }
   toast('Da dan ' + inserts.length + ' anh vao Claude');
   term.focus();
+}, true);
+
+// ---------- Ctrl+Z: (1) huy duong dan vua paste vao terminal; (2) khoi phuc anh vua xoa ----------
+// LUON chan Ctrl+Z o tang trang (stopPropagation o pha capture -> xterm khong nhan duoc)
+// => khong bao gio gui SIGTSTP suspend Claude, ke ca khi khong con gi de undo.
+window.addEventListener('keydown', async e => {
+  if (!((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z')) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  if (lastPasteLen > 0) {                     // vua paste anh -> xoa dung bay nhieu ky tu o o chat
+    if (ws.readyState===1) ws.send(enc.encode('\x7f'.repeat(lastPasteLen)));
+    lastPasteLen = 0;
+    toast('Da huy duong dan anh vua paste');
+  } else if (deletedCount > 0) {              // khoi phuc anh vua chuyen vao thung rac
+    try {
+      const r = await (await fetch('/undo', {method:'POST'})).json();
+      if (r.restored) { deletedCount--; poll(); toast('Da khoi phuc ' + r.restored.split('/').pop()); }
+      else { deletedCount = 0; toast('Khong con anh de khoi phuc'); }
+    } catch(_) { toast('Khoi phuc that bai'); }
+  }
+  // khong con gi de undo -> nuot luon, khong lam gi (khong suspend terminal)
 }, true);
 </script>
 </body>

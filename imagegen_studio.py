@@ -17,6 +17,7 @@ import base64
 import fcntl
 import os
 import pty
+import shutil
 import signal
 import subprocess
 import glob
@@ -68,17 +69,53 @@ async def reveal(request):
 
 
 async def delete(request):
-    """Xoa file anh that tren o dia, chi trong ROOT cho phep."""
+    """Chuyen anh vao thung rac (.trash) thay vi xoa han -> Ctrl+Z khoi phuc duoc.
+    Ghi log LIFO (trashpath<TAB>origpath) de /undo pop nguoc lai."""
     p = os.path.realpath(urllib.parse.unquote(request.query.get("p", "")))
     if not any(p == r or p.startswith(r + os.sep) for r in request.app["ROOTS"]) \
             or not os.path.isfile(p):
         return web.Response(status=404, text="not found")
-    os.remove(p)
-    try:
-        os.remove(p + ".txt")   # xoa kem prompt sidecar neu co
-    except OSError:
-        pass
+    trash = request.app["TRASH"]
+    os.makedirs(trash, exist_ok=True)
+    stem, ext = os.path.splitext(os.path.basename(p))
+    dst = os.path.join(trash, stem + ext)
+    n = 1
+    while os.path.exists(dst):
+        dst = os.path.join(trash, "%s_%d%s" % (stem, n, ext))
+        n += 1
+    shutil.move(p, dst)                       # shutil.move: chiu duoc khac o dia (NTFS->HOME)
+    if os.path.exists(p + ".txt"):
+        shutil.move(p + ".txt", dst + ".txt")  # dem prompt sidecar theo
+    with open(request.app["TRASHLOG"], "a", encoding="utf-8") as f:
+        f.write(dst + "\t" + p + "\n")
     return web.Response(text="ok")
+
+
+async def undo(request):
+    """Khoi phuc anh vua chuyen vao thung rac (LIFO)."""
+    log = request.app["TRASHLOG"]
+    try:
+        with open(log, encoding="utf-8") as f:
+            lines = [l for l in f.read().splitlines() if l.strip()]
+    except OSError:
+        lines = []
+    while lines:
+        dst, orig = lines.pop().split("\t", 1)
+        if not os.path.exists(dst):
+            continue                          # da bi don tay -> bo qua, thu cai truoc do
+        try:
+            os.makedirs(os.path.dirname(orig), exist_ok=True)
+            shutil.move(dst, orig)
+            if os.path.exists(dst + ".txt"):
+                shutil.move(dst + ".txt", orig + ".txt")
+        except OSError as e:
+            return web.json_response({"restored": None, "err": str(e)})
+        with open(log, "w", encoding="utf-8") as f:
+            f.write("".join(l + "\n" for l in lines))
+        return web.json_response({"restored": orig})
+    with open(log, "w", encoding="utf-8") as f:  # het -> don sach log
+        f.write("")
+    return web.json_response({"restored": None})
 
 
 async def version(request):
@@ -105,13 +142,16 @@ def _gallery_roots(app):
 async def gallery(request):
     """Liet ke anh gen (de quy), moi nhat truoc. Bo qua thu muc refs (anh input)."""
     refs = os.path.realpath(request.app["REFS"])
+    trash = os.path.realpath(request.app["TRASH"])
     seen, items = set(), []
     for root in _gallery_roots(request.app):
         if not os.path.isdir(root):
             continue
         for dp, dirs, files in os.walk(root):
             rp = os.path.realpath(dp)
-            if rp == refs or rp.startswith(refs + os.sep):  # anh keo vao != anh gen
+            # anh keo vao (refs) va anh da xoa (.trash) khong hien tren gallery
+            if rp == refs or rp.startswith(refs + os.sep) \
+                    or rp == trash or rp.startswith(trash + os.sep):
                 dirs[:] = []
                 continue
             for fn in files:
@@ -237,6 +277,8 @@ def main():
     # anh mockup that thuong 1-8MB, base64 phinh them 33% -> noi gioi han body.
     app = web.Application(client_max_size=100 * 1024 * 1024)
     app["OUT"], app["REFS"] = out, refs
+    app["TRASH"] = os.path.join(os.path.dirname(out), ".trash")
+    app["TRASHLOG"] = os.path.join(app["TRASH"], "undo_log.tsv")
     app["SRC_MTIME"] = _src_mtime()
     # cac goc duoc phep phuc vu anh: ca thu muc studio (chua out*/refs) + project
     app["ROOTS"] = [os.path.realpath(p) for p in (os.path.dirname(out), ROOT)]
@@ -248,6 +290,7 @@ def main():
         web.get("/media", media),
         web.get("/reveal", reveal),
         web.get("/delete", delete),
+        web.post("/undo", undo),
         web.get("/version", version),
         web.post("/restart", restart),
     ])

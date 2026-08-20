@@ -154,7 +154,7 @@ async function checkVersion(){
   try {
     const v = await (await fetch('/version')).json();
     if (v.stale) {
-      restartBtn.style.display = '';
+      restartBtn.style.display = 'inline-block';
       if (!notified) { notified = true; toast('Code Studio da cap nhat — bam ↻ Restart de nap lai'); }
     }
   } catch(e){}

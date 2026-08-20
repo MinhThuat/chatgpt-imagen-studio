@@ -34,6 +34,9 @@
   #gallery a { display:block; position:relative; border-radius:10px; overflow:hidden;
     border:1px solid var(--line); background:var(--panel); }
   #gallery img { width:100%; display:block; }
+  #gallery .cap { font-size:11px; line-height:1.4; color:var(--mut); padding:6px 8px;
+    border-top:1px solid var(--line); white-space:pre-wrap; word-break:break-word;
+    max-height:5.6em; overflow-y:auto; }
   #gallery .del { position:absolute; top:6px; right:6px; padding:2px 7px; font-size:13px;
     background:rgba(20,24,31,.72); border-color:transparent; opacity:0; transition:opacity .15s; }
   #gallery a:hover .del { opacity:1; }
@@ -130,7 +133,14 @@ async function poll(){
           toast('Da xoa ' + it.name);
         });
       };
-      a.appendChild(img); a.appendChild(del); gallery.insertBefore(a, gallery.firstChild);
+      a.appendChild(img); a.appendChild(del);
+      if (it.prompt) {
+        const cap = document.createElement('div'); cap.className = 'cap';
+        cap.textContent = it.prompt; cap.title = it.prompt;
+        cap.onclick = (e) => e.preventDefault();   // cuon/chon text, khong mo folder
+        a.appendChild(cap);
+      }
+      gallery.insertBefore(a, gallery.firstChild);
     }
     cnt.textContent = shown.size ? shown.size + ' anh' : '';
   } catch(e){}
@@ -240,6 +250,28 @@ window.addEventListener('drop', async e => {
   // go duong dan thang vao o nhap cua terminal (Claude nhin thay)
   if (ws.readyState===1) ws.send(enc.encode(' ' + inserts.map(i => i.path).join(' ') + ' '));
   toast('Da nap ' + inserts.length + ' muc vao Claude');
+  term.focus();
+}, true);
+
+// ---------- Paste anh (Ctrl+V) — vd copy anh tren web roi dan vao ----------
+// "Copy image" tren trang web dat binary anh vao clipboard -> getAsFile() lay duoc.
+// (Rieng "Copy image address" chi co URL, khong co binary -> khong ho tro, xem note.)
+window.addEventListener('paste', async e => {
+  const imgs = [...(e.clipboardData?.items || [])]
+    .filter(it => it.kind === 'file' && it.type.startsWith('image/'))
+    .map(it => it.getAsFile()).filter(Boolean);
+  if (!imgs.length) return;                 // khong phai anh -> de terminal paste text binh thuong
+  e.preventDefault(); e.stopPropagation();
+  const inserts = [];
+  try {
+    for (const f of imgs) {
+      const name = f.name && /\.\w+$/.test(f.name) ? f.name : 'paste.' + (f.type.split('/')[1] || 'png');
+      inserts.push({path: (await uploadOne(new File([f], name, {type:f.type}))).path, label: name});
+    }
+  } catch(err) { toast('Loi dan anh: ' + err.message); return; }
+  for (const it of inserts) chip(it.label, it.path);
+  if (ws.readyState===1) ws.send(enc.encode(' ' + inserts.map(i => i.path).join(' ') + ' '));
+  toast('Da dan ' + inserts.length + ' anh vao Claude');
   term.focus();
 }, true);
 </script>

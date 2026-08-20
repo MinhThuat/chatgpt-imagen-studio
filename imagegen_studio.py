@@ -74,6 +74,10 @@ async def delete(request):
             or not os.path.isfile(p):
         return web.Response(status=404, text="not found")
     os.remove(p)
+    try:
+        os.remove(p + ".txt")   # xoa kem prompt sidecar neu co
+    except OSError:
+        pass
     return web.Response(text="ok")
 
 
@@ -117,8 +121,15 @@ async def gallery(request):
                 if fp in seen:
                     continue
                 seen.add(fp)
+                prompt = ""
+                try:
+                    with open(fp + ".txt", encoding="utf-8") as pf:
+                        prompt = pf.read(2000).strip()
+                except OSError:
+                    pass
                 try:
                     items.append({"name": fn, "mtime": os.path.getmtime(fp),
+                                  "prompt": prompt,
                                   "url": "/media?p=" + urllib.parse.quote(fp)})
                 except OSError:
                     pass

@@ -44,7 +44,8 @@ gen_one() {
   local dst="$OUT/$(basename "$in")"
   echo "start: $(basename "$in")"
   python3 "$CLI" "$PROMPT" -i "$in" -o "$dst" \
-    --size 1024x1024 --backend codex --quiet
+    --size 1024x1024 --backend codex --quiet \
+    && printf '%s\n' "$PROMPT" > "$dst.txt"   # sidecar -> gallery hien prompt duoi anh
 }
 export -f gen_one
 export PROMPT OUT CLI

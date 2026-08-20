@@ -18,6 +18,7 @@ import fcntl
 import os
 import pty
 import signal
+import subprocess
 import glob
 import struct
 import termios
@@ -46,6 +47,16 @@ async def media(request):
         return web.Response(status=404, text="not found")
     ext = os.path.splitext(p)[1].lower()
     return web.FileResponse(p, headers={"Content-Type": MIME.get(ext, "application/octet-stream")})
+
+
+async def reveal(request):
+    """Mo thu muc chua anh bang file manager (xdg-open), chi trong ROOT cho phep."""
+    p = os.path.realpath(urllib.parse.unquote(request.query.get("p", "")))
+    if not any(p == r or p.startswith(r + os.sep) for r in request.app["ROOTS"]) \
+            or not os.path.isfile(p):
+        return web.Response(status=404, text="not found")
+    subprocess.Popen(["xdg-open", os.path.dirname(p)])
+    return web.Response(text="ok")
 
 
 def _gallery_roots(app):
@@ -191,6 +202,7 @@ def main():
         web.get("/gallery", gallery),
         web.post("/upload", upload),
         web.get("/media", media),
+        web.get("/reveal", reveal),
     ])
     print("Studio: http://127.0.0.1:%d   (out=%s)" % (a.port, out))
     web.run_app(app, host="127.0.0.1", port=a.port, print=None)

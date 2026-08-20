@@ -107,7 +107,8 @@ async function poll(){
       shown.add(it.url);
       empty.style.display = 'none';
       const a = document.createElement('a');
-      a.href = it.url; a.target = '_blank'; a.title = it.name;
+      a.href = '#'; a.title = 'Mo thu muc chua anh: ' + it.name;
+      a.onclick = (e) => { e.preventDefault(); fetch('/reveal?p=' + it.url.split('p=')[1]); };
       const img = document.createElement('img'); img.src = it.url; img.loading = 'lazy';
       a.appendChild(img); gallery.insertBefore(a, gallery.firstChild);
     }

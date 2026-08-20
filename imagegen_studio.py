@@ -21,6 +21,7 @@ import signal
 import subprocess
 import glob
 import struct
+import sys
 import termios
 import urllib.parse
 
@@ -33,6 +34,13 @@ HOME = os.path.expanduser("~")
 MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
         ".webp": "image/webp", ".gif": "image/gif"}
 IMG_EXT = set(MIME)
+
+# source code cua Studio -> phat hien khi code doi de nhac restart
+SRC = [os.path.join(ROOT, f) for f in ("imagegen_studio.py", "studio.html")]
+
+
+def _src_mtime():
+    return max((os.path.getmtime(f) for f in SRC if os.path.exists(f)), default=0)
 
 
 async def index(request):
@@ -57,6 +65,30 @@ async def reveal(request):
         return web.Response(status=404, text="not found")
     subprocess.Popen(["xdg-open", os.path.dirname(p)])
     return web.Response(text="ok")
+
+
+async def delete(request):
+    """Xoa file anh that tren o dia, chi trong ROOT cho phep."""
+    p = os.path.realpath(urllib.parse.unquote(request.query.get("p", "")))
+    if not any(p == r or p.startswith(r + os.sep) for r in request.app["ROOTS"]) \
+            or not os.path.isfile(p):
+        return web.Response(status=404, text="not found")
+    os.remove(p)
+    return web.Response(text="ok")
+
+
+async def version(request):
+    """Bao cho UI biet code da doi so voi luc server khoi dong -> can restart."""
+    return web.json_response({"stale": _src_mtime() > request.app["SRC_MTIME"]})
+
+
+async def restart(request):
+    """Khoi dong lai server (re-exec) de nap code moi."""
+    async def _go():
+        await asyncio.sleep(0.3)
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+    asyncio.ensure_future(_go())
+    return web.Response(text="restarting")
 
 
 def _gallery_roots(app):
@@ -194,6 +226,7 @@ def main():
     # anh mockup that thuong 1-8MB, base64 phinh them 33% -> noi gioi han body.
     app = web.Application(client_max_size=100 * 1024 * 1024)
     app["OUT"], app["REFS"] = out, refs
+    app["SRC_MTIME"] = _src_mtime()
     # cac goc duoc phep phuc vu anh: ca thu muc studio (chua out*/refs) + project
     app["ROOTS"] = [os.path.realpath(p) for p in (os.path.dirname(out), ROOT)]
     app.add_routes([
@@ -203,6 +236,9 @@ def main():
         web.post("/upload", upload),
         web.get("/media", media),
         web.get("/reveal", reveal),
+        web.get("/delete", delete),
+        web.get("/version", version),
+        web.post("/restart", restart),
     ])
     print("Studio: http://127.0.0.1:%d   (out=%s)" % (a.port, out))
     web.run_app(app, host="127.0.0.1", port=a.port, print=None)

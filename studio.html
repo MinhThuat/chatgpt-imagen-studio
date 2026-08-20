@@ -31,9 +31,14 @@
 
   #gallery { flex:1; overflow-y:auto; padding:14px; display:grid; gap:12px;
     grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); align-content:start; }
-  #gallery a { display:block; border-radius:10px; overflow:hidden; border:1px solid var(--line);
-    background:var(--panel); }
+  #gallery a { display:block; position:relative; border-radius:10px; overflow:hidden;
+    border:1px solid var(--line); background:var(--panel); }
   #gallery img { width:100%; display:block; }
+  #gallery .del { position:absolute; top:6px; right:6px; padding:2px 7px; font-size:13px;
+    background:rgba(20,24,31,.72); border-color:transparent; opacity:0; transition:opacity .15s; }
+  #gallery a:hover .del { opacity:1; }
+  #gallery .del:hover { background:#7a1f1f; border-color:#e06; color:#fff; }
+  #restart { display:none; background:#4a2f10; border-color:#e0902e; color:#ffcf8a; }
   #empty { color:var(--mut); grid-column:1/-1; text-align:center; padding:60px 0; }
   #drop { position:absolute; inset:0; display:none; align-items:center; justify-content:center;
     background:rgba(110,168,254,.12); border:3px dashed var(--accent); z-index:5;
@@ -52,6 +57,7 @@
       <div id="refs" title="Anh reference da keo vao"></div>
       <div class="sp"></div>
       <span id="cnt" style="color:var(--mut)"></span>
+      <button id="restart" title="Code Studio da doi — bam de nap lai">↻ Restart (code moi)</button>
       <button id="new">＋ New (xoa gallery)</button>
     </div>
     <div id="gallery"><div id="empty">Keo folder / anh vao day de lam reference.<br>Anh gen xong se hien o day.</div></div>
@@ -106,16 +112,50 @@ async function poll(){
       if (it.mtime <= clearedAt || shown.has(it.url)) continue;
       shown.add(it.url);
       empty.style.display = 'none';
+      const enc = it.url.split('p=')[1];
       const a = document.createElement('a');
       a.href = '#'; a.title = 'Mo thu muc chua anh: ' + it.name;
-      a.onclick = (e) => { e.preventDefault(); fetch('/reveal?p=' + it.url.split('p=')[1]); };
+      a.onclick = (e) => { e.preventDefault(); fetch('/reveal?p=' + enc); };
       const img = document.createElement('img'); img.src = it.url; img.loading = 'lazy';
-      a.appendChild(img); gallery.insertBefore(a, gallery.firstChild);
+      const del = document.createElement('button');
+      del.className = 'del'; del.textContent = '🗑'; del.title = 'Xoa anh (xoa ca file tren o dia)';
+      del.onclick = (e) => {
+        e.preventDefault(); e.stopPropagation();
+        if (!confirm('Xoa han file ' + it.name + ' ?')) return;
+        fetch('/delete?p=' + enc).then(r => {
+          if (!r.ok) { toast('Xoa that bai: ' + it.name); return; }
+          a.remove(); shown.delete(it.url);
+          cnt.textContent = shown.size ? shown.size + ' anh' : '';
+          if (!shown.size) empty.style.display = '';
+          toast('Da xoa ' + it.name);
+        });
+      };
+      a.appendChild(img); a.appendChild(del); gallery.insertBefore(a, gallery.firstChild);
     }
     cnt.textContent = shown.size ? shown.size + ' anh' : '';
   } catch(e){}
 }
 poll(); setInterval(poll, 2000);
+
+// ---------- Bao code doi + restart server ----------
+const restartBtn = document.getElementById('restart');
+let notified = false;
+async function checkVersion(){
+  try {
+    const v = await (await fetch('/version')).json();
+    if (v.stale) {
+      restartBtn.style.display = '';
+      if (!notified) { notified = true; toast('Code Studio da cap nhat — bam ↻ Restart de nap lai'); }
+    }
+  } catch(e){}
+}
+checkVersion(); setInterval(checkVersion, 3000);
+
+restartBtn.onclick = async () => {
+  restartBtn.disabled = true; toast('Dang restart server…');
+  try { await fetch('/restart', {method:'POST'}); } catch(e){}
+  setTimeout(() => location.reload(), 1500);
+};
 
 document.getElementById('new').onclick = () => {
   clearedAt = Date.now()/1000;

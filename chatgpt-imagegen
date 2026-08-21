@@ -564,6 +564,23 @@ def _build_payload(
     }
 
 
+def _save_response_headers(resp) -> None:
+    """Ghi header phan hoi codex (chua rate-limit) ra ~/.codex/imagegen_ratelimit.json
+    de Studio hien quota. Best-effort tuyet doi: khong bao gio lam hong gen."""
+    try:
+        d = os.path.join(os.path.expanduser("~"), ".codex")
+        os.makedirs(d, exist_ok=True)
+        data = {"at": time.time(),
+                "headers": {k.lower(): v for k, v in dict(resp.headers).items()}}
+        p = os.path.join(d, "imagegen_ratelimit.json")
+        tmp = p + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        os.replace(tmp, p)
+    except Exception:
+        pass
+
+
 def _stream(
     url: str,
     headers: dict[str, str],
@@ -590,6 +607,7 @@ def _stream(
     # Initial connect timeout: shorter of remaining budget or 30s.
     initial = max(1.0, min(30.0, deadline - time.monotonic()))
     resp = urllib.request.urlopen(req, timeout=initial)
+    _save_response_headers(resp)  # bat rate-limit header -> Studio hien quota
     # Loosen the per-read timeout: a quiet gap between SSE chunks routinely
     # exceeds the 30s connect timeout, and the overall wall-clock cap is already
     # enforced by the `deadline` check below — so bound the per-read idle window

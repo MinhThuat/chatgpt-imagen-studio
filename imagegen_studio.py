@@ -154,7 +154,47 @@ def _find_rate_limits(o):
     return None
 
 
-def _codex_quota():
+def _codex_from_headers():
+    """Quota tu rate-limit HEADER cua response gen anh (CLI ghi imagegen_ratelimit.json).
+    Cap nhat MOI LAN GEN -> nguon chinh trong Studio (session it khi co)."""
+    p = os.path.join(HOME, ".codex", "imagegen_ratelimit.json")
+    try:
+        with open(p, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    h = data.get("headers") or {}
+    at = data.get("at") or os.path.getmtime(p)
+
+    def find(*subs):  # gia tri so cua header dau tien co chua tat ca substring
+        for k, v in h.items():
+            if all(s in k for s in subs):
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    pass
+        return None
+
+    out, got = {"at": at, "plan": None}, False
+    for tier in ("primary", "secondary"):
+        used = find(tier, "used", "percent")
+        if used is None:
+            used = find(tier, "used")
+        if used is None:
+            continue
+        got = True
+        d = {"remaining_percent": round(100 - used, 1)}
+        win = find(tier, "window")
+        if win is not None:
+            d["window_minutes"] = win
+        reset = find(tier, "reset")  # thuong la so giay con lai -> resets_at tuyet doi
+        if reset is not None:
+            d["resets_at"] = at + reset
+        out[tier] = d
+    return out if got else None
+
+
+def _codex_from_sessions():
     """Quota codex tu snapshot rate_limits moi nhat trong ~/.codex/sessions.
     Chi cap nhat khi dung codex CLI (gen anh POST thang -> khong ghi session)."""
     files = glob.glob(os.path.join(HOME, ".codex", "sessions", "**", "*.jsonl"), recursive=True)
@@ -185,6 +225,11 @@ def _codex_quota():
                       "resets_at": w.get("resets_at"),
                       "window_minutes": w.get("window_minutes")}
     return out
+
+
+def _codex_quota():
+    # header moi lan gen la nguon chinh; session chi la du phong (it khi co)
+    return _codex_from_headers() or _codex_from_sessions()
 
 
 def _iso_epoch(ts):

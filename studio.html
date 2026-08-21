@@ -169,8 +169,14 @@ async function pollQuota(){
       if (p) out.push(`<span title="Codex ${q.codex.plan||''} · cap nhat khi dung codex CLI">`
         + `codex <b>${p.remaining_percent}%</b>` + (p.resets_at ? ` · ${fmtReset(p.resets_at)}` : '') + `</span>`);
     }
-    if (q.claude) out.push(`<span title="Token Claude da dung trong ${q.claude.window_hours}h (local khong co han muc de tinh con lai)">`
-      + `claude <b>${(q.claude.used_tokens/1000).toFixed(0)}k</b>/${q.claude.window_hours}h</span>`);
+    if (q.claude) {
+      const c = q.claude;
+      const body = (c.remaining_percent != null)
+        ? `claude <b>${c.remaining_percent}%</b> · ${(c.used_tokens/1000).toFixed(0)}k/${(c.limit/1000).toFixed(0)}k`
+        : `claude <b>${(c.used_tokens/1000).toFixed(0)}k</b>/${c.window_hours}h`;
+      out.push(`<span title="Token Claude da dung trong ${c.window_hours}h`
+        + (c.remaining_percent != null ? ` (han muc CLAUDE_5H_LIMIT)` : ` (dat CLAUDE_5H_LIMIT de hien %)`) + `">${body}</span>`);
+    }
     quotaEl.innerHTML = out.join('');
   } catch(e){}
 }

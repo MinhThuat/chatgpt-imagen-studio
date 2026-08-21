@@ -269,7 +269,16 @@ def _claude_usage(window_h=5):
                         msgs += 1
         except OSError:
             continue
-    return {"used_tokens": total, "messages": msgs, "window_hours": window_h}
+    out = {"used_tokens": total, "messages": msgs, "window_hours": window_h}
+    # Neu biet han muc (env CLAUDE_5H_LIMIT, don vi token) -> tinh con lai %.
+    try:
+        limit = int(os.environ.get("CLAUDE_5H_LIMIT", "0"))
+    except ValueError:
+        limit = 0
+    if limit > 0:
+        out["limit"] = limit
+        out["remaining_percent"] = round(max(0.0, 100 * (1 - total / limit)), 1)
+    return out
 
 
 async def quota(request):

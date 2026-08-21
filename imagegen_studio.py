@@ -15,6 +15,7 @@ import argparse
 import asyncio
 import base64
 import fcntl
+import json
 import os
 import pty
 import shutil
@@ -24,7 +25,9 @@ import glob
 import struct
 import sys
 import termios
+import time
 import urllib.parse
+from datetime import datetime
 
 from aiohttp import WSMsgType, web
 
@@ -130,6 +133,107 @@ async def restart(request):
         os.execv(sys.executable, [sys.executable] + sys.argv)
     asyncio.ensure_future(_go())
     return web.Response(text="restarting")
+
+
+# ---------- Quota: doc local (khong goi mang, khong ton token) ----------
+def _find_rate_limits(o):
+    """Tim object 'rate_limits' o bat ky do sau nao trong 1 dong JSON."""
+    if isinstance(o, dict):
+        rl = o.get("rate_limits")
+        if isinstance(rl, dict):
+            return rl
+        for v in o.values():
+            r = _find_rate_limits(v)
+            if r:
+                return r
+    elif isinstance(o, list):
+        for v in o:
+            r = _find_rate_limits(v)
+            if r:
+                return r
+    return None
+
+
+def _codex_quota():
+    """Quota codex tu snapshot rate_limits moi nhat trong ~/.codex/sessions.
+    Chi cap nhat khi dung codex CLI (gen anh POST thang -> khong ghi session)."""
+    files = glob.glob(os.path.join(HOME, ".codex", "sessions", "**", "*.jsonl"), recursive=True)
+    if not files:
+        return None
+    latest = max(files, key=os.path.getmtime)
+    rl = None
+    try:
+        with open(latest, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if '"rate_limits"' not in line:
+                    continue
+                try:
+                    r = _find_rate_limits(json.loads(line))
+                except ValueError:
+                    continue
+                if r:
+                    rl = r  # giu cai cuoi cung (moi nhat)
+    except OSError:
+        return None
+    if not rl:
+        return None
+    out = {"plan": rl.get("plan_type"), "at": os.path.getmtime(latest)}
+    for k in ("primary", "secondary"):
+        w = rl.get(k)
+        if isinstance(w, dict) and w.get("used_percent") is not None:
+            out[k] = {"remaining_percent": round(100 - w["used_percent"], 1),
+                      "resets_at": w.get("resets_at"),
+                      "window_minutes": w.get("window_minutes")}
+    return out
+
+
+def _iso_epoch(ts):
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+    except (ValueError, AttributeError):
+        return None
+
+
+def _claude_usage(window_h=5):
+    """Token Claude da tieu trong cua so window_h gio gan nhat (tong tu transcript
+    ~/.claude/projects). Local chi co token DA DUNG, khong co han muc -> khong tinh
+    duoc 'con lai' that; hien phan da dung."""
+    cutoff = time.time() - window_h * 3600
+    total = msgs = 0
+    for fp in glob.glob(os.path.join(HOME, ".claude", "projects", "**", "*.jsonl"), recursive=True):
+        try:
+            if os.path.getmtime(fp) < cutoff:  # file khong dong trong window -> bo qua
+                continue
+            with open(fp, encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    if '"usage"' not in line:
+                        continue
+                    try:
+                        o = json.loads(line)
+                    except ValueError:
+                        continue
+                    t = _iso_epoch(o.get("timestamp") or "")
+                    if t is not None and t < cutoff:
+                        continue
+                    m = o.get("message")
+                    u = m.get("usage") if isinstance(m, dict) else o.get("usage")
+                    if isinstance(u, dict):
+                        # bo cache_read (token cache doc lai, re ~0.1x, phinh rat to)
+                        total += ((u.get("input_tokens") or 0) + (u.get("output_tokens") or 0)
+                                  + (u.get("cache_creation_input_tokens") or 0))
+                        msgs += 1
+        except OSError:
+            continue
+    return {"used_tokens": total, "messages": msgs, "window_hours": window_h}
+
+
+async def quota(request):
+    """Quota codex (con lai %) + token Claude da dung (5h). Chay o executor de
+    khong nghen event loop khi quet file."""
+    loop = asyncio.get_event_loop()
+    codex = await loop.run_in_executor(None, _codex_quota)
+    claude = await loop.run_in_executor(None, _claude_usage)
+    return web.json_response({"codex": codex, "claude": claude})
 
 
 def _gallery_roots(app):
@@ -292,6 +396,7 @@ def main():
         web.get("/delete", delete),
         web.post("/undo", undo),
         web.get("/version", version),
+        web.get("/quota", quota),
         web.post("/restart", restart),
     ])
     print("Studio: http://127.0.0.1:%d   (out=%s)" % (a.port, out))

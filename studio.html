@@ -20,6 +20,10 @@
   button { background:#222835; color:var(--fg); border:1px solid var(--line);
     border-radius:7px; padding:6px 12px; cursor:pointer; font-size:13px; }
   button:hover { border-color:var(--accent); color:var(--accent); }
+  #quota { display:flex; gap:8px; font-size:12px; }
+  #quota span { background:#20262f; border:1px solid var(--line); border-radius:12px;
+    padding:3px 9px; white-space:nowrap; color:var(--mut); }
+  #quota b { color:var(--accent); font-weight:600; }
   #refs { display:flex; gap:6px; overflow-x:auto; max-width:46vw; align-items:center; }
   #refs img { height:34px; width:34px; object-fit:cover; border-radius:5px; border:1px solid var(--line); }
   #refs .chip { flex:none; font-size:12px; color:var(--mut); background:#20262f;
@@ -59,6 +63,7 @@
       <h1>🎨 Imagegen Studio</h1>
       <div id="refs" title="Anh reference da keo vao"></div>
       <div class="sp"></div>
+      <span id="quota" title="Quota con lai"></span>
       <span id="cnt" style="color:var(--mut)"></span>
       <button id="restart" title="Code Studio da doi — bam de nap lai">↻ Restart (code moi)</button>
       <button id="new">＋ New (xoa gallery)</button>
@@ -149,6 +154,27 @@ async function poll(){
   } catch(e){}
 }
 poll(); setInterval(poll, 2000);
+
+// ---------- Quota codex (con lai %) + token Claude da dung (5h) ----------
+const quotaEl = document.getElementById('quota');
+function fmtReset(ts){ if(!ts) return ''; const s = ts*1000 - Date.now();
+  if (s <= 0) return 'reset'; const h = Math.floor(s/3.6e6), m = Math.floor(s%3.6e6/6e4);
+  return h ? h+'h'+m+'m' : m+'m'; }
+async function pollQuota(){
+  try {
+    const q = await (await fetch('/quota')).json();
+    const out = [];
+    if (q.codex) {
+      const p = q.codex.primary || q.codex.secondary;
+      if (p) out.push(`<span title="Codex ${q.codex.plan||''} · cap nhat khi dung codex CLI">`
+        + `codex <b>${p.remaining_percent}%</b>` + (p.resets_at ? ` · ${fmtReset(p.resets_at)}` : '') + `</span>`);
+    }
+    if (q.claude) out.push(`<span title="Token Claude da dung trong ${q.claude.window_hours}h (local khong co han muc de tinh con lai)">`
+      + `claude <b>${(q.claude.used_tokens/1000).toFixed(0)}k</b>/${q.claude.window_hours}h</span>`);
+    quotaEl.innerHTML = out.join('');
+  } catch(e){}
+}
+pollQuota(); setInterval(pollQuota, 30000);
 
 // ---------- Bao code doi + restart server ----------
 const restartBtn = document.getElementById('restart');

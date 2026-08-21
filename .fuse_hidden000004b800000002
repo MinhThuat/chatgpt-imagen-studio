@@ -12,22 +12,10 @@ BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" || {
 
 update_once() {
   git fetch -q origin "$BRANCH" 2>/dev/null || return 0   # mat mang -> thu lai sau
-  local local_h remote_h base
+  local local_h remote_h
   local_h="$(git rev-parse HEAD)"
   remote_h="$(git rev-parse "origin/$BRANCH" 2>/dev/null)" || return 0
   [ "$local_h" = "$remote_h" ] && return 0
-
-  # KHONG bao gio nuot cong viec local: bo qua reset neu co thay doi chua commit
-  # hoac local di TRUOC/re nhanh so voi origin (may tac gia). Chi reset khi local
-  # thuc su di SAU origin (may user thuan tuy tieu thu).
-  if [ -n "$(git status --porcelain)" ]; then
-    echo "[autoupdate] co thay doi chua commit — bo qua tu cap nhat."; return 0
-  fi
-  base="$(git merge-base HEAD "origin/$BRANCH" 2>/dev/null)"
-  if [ "$base" != "$local_h" ]; then
-    echo "[autoupdate] local di truoc/re nhanh origin — bo qua (day: git push)."; return 0
-  fi
-
   git reset --hard -q "origin/$BRANCH" \
     && echo "[autoupdate] da cap nhat code moi (${remote_h:0:7}) — chay lai Studio de ap dung."
 }

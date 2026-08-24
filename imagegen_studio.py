@@ -27,6 +27,7 @@ import sys
 import termios
 import time
 import urllib.parse
+import uuid
 from datetime import datetime
 
 from aiohttp import WSMsgType, web
@@ -353,6 +354,53 @@ async def upload(request):
     with open(fp, "wb") as f:
         f.write(raw)
     return web.json_response({"path": fp, "dir": base})
+
+
+def _valid_uuid(s):
+    """True neu s la uuid canonical (dung phan biet folder chat vs set thuong)."""
+    try:
+        return str(uuid.UUID(str(s))) == str(s).lower()
+    except (ValueError, AttributeError, TypeError):
+        return False
+
+
+def _claude_project_dir():
+    """Thu muc transcript Claude cho ROOT: ~/.claude/projects/<ROOT '/'&'.'->'->'-'>."""
+    enc = ROOT.replace("/", "-").replace(".", "-")
+    return os.path.join(HOME, ".claude", "projects", enc)
+
+
+def _chat_title(path, maxlen=60):
+    """Cau user text dau tien trong transcript jsonl -> tieu de chat. None neu khong co."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if '"user"' not in line:
+                    continue
+                try:
+                    o = json.loads(line)
+                except ValueError:
+                    continue
+                if o.get("type") != "user":
+                    continue
+                c = (o.get("message") or {}).get("content")
+                text = ""
+                if isinstance(c, str):
+                    text = c
+                elif isinstance(c, list):
+                    for b in c:
+                        if isinstance(b, dict) and b.get("type") == "text":
+                            text = b.get("text", "")
+                            break
+                        if isinstance(b, str):
+                            text = b
+                            break
+                text = text.strip()
+                if text:
+                    return text[:maxlen] + ("…" if len(text) > maxlen else "")
+    except OSError:
+        pass
+    return None
 
 
 async def pty_ws(request):

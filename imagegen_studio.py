@@ -302,8 +302,13 @@ async def gallery(request):
     """Liet ke anh gen (de quy), moi nhat truoc. Bo qua thu muc refs (anh input)."""
     refs = os.path.realpath(request.app["REFS"])
     trash = os.path.realpath(request.app["TRASH"])
+    chat = request.query.get("chat", "")
+    if _valid_uuid(chat):
+        roots = [os.path.join(request.app["OUT"], chat)]   # chi anh cua chat nay
+    else:
+        roots = _gallery_roots(request.app)
     seen, items = set(), []
-    for root in _gallery_roots(request.app):
+    for root in roots:
         if not os.path.isdir(root):
             continue
         for dp, dirs, files in os.walk(root):
@@ -334,6 +339,46 @@ async def gallery(request):
                     pass
     items.sort(key=lambda x: x["mtime"], reverse=True)
     return web.json_response(items[:300])
+
+
+async def chats(request):
+    """Danh sach chat: moi folder out/<uuid> co it nhat 1 anh = 1 chat.
+    Tieu de doc tu transcript Claude (cung uuid)."""
+    out = request.app["OUT"]
+    proj = _claude_project_dir()
+    try:
+        names = os.listdir(out)
+    except OSError:
+        names = []
+    items = []
+    for name in names:
+        if not _valid_uuid(name):
+            continue
+        folder = os.path.join(out, name)
+        if not os.path.isdir(folder):
+            continue
+        newest, count = None, 0
+        for dp, dirs, files in os.walk(folder):
+            for fn in files:
+                if os.path.splitext(fn)[1].lower() not in IMG_EXT:
+                    continue
+                fp = os.path.join(dp, fn)
+                try:
+                    mt = os.path.getmtime(fp)
+                except OSError:
+                    continue
+                count += 1
+                if newest is None or mt > newest[0]:
+                    newest = (mt, fp)
+        if not count:
+            continue
+        title = _chat_title(os.path.join(proj, name + ".jsonl")) \
+            or datetime.fromtimestamp(newest[0]).strftime("%Y-%m-%d %H:%M")
+        items.append({"id": name, "title": title, "count": count,
+                      "mtime": newest[0],
+                      "thumb_url": "/media?p=" + urllib.parse.quote(newest[1])})
+    items.sort(key=lambda x: x["mtime"], reverse=True)
+    return web.json_response(items)
 
 
 async def upload(request):
@@ -502,6 +547,7 @@ def main():
         web.get("/", index),
         web.get("/pty", pty_ws),
         web.get("/gallery", gallery),
+        web.get("/chats", chats),
         web.post("/upload", upload),
         web.get("/media", media),
         web.get("/reveal", reveal),

@@ -154,9 +154,11 @@ const gallery = document.getElementById('gallery'), empty = document.getElementB
 const shown = new Set();
 
 async function poll(){
+  const forChat = currentChat;                 // token captured before await
   try {
-    const url = currentChat ? '/gallery?chat=' + currentChat : '/gallery';
+    const url = forChat ? '/gallery?chat=' + forChat : '/gallery';
     const list = await (await fetch(url)).json();
+    if (forChat !== currentChat) return;       // user switched chat mid-fetch -> stale response, drop it
     // moi nhat truoc -> render nguoc de prepend giu thu tu
     for (const it of list.slice().reverse()) {
       if (shown.has(it.url)) continue;

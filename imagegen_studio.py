@@ -404,14 +404,22 @@ def _chat_title(path, maxlen=60):
 
 
 async def pty_ws(request):
-    """Cau noi terminal: spawn bash -> tu mo claude, bom byte 2 chieu qua WS."""
+    """Cau noi terminal: spawn bash -> tu mo claude, bom byte 2 chieu qua WS.
+    ?chat=<uuid>: resume phien do neu da co transcript, khong thi tao moi voi id do."""
     ws = web.WebSocketResponse()
     await ws.prepare(request)
+
+    chat = request.query.get("chat", "")
+    if not _valid_uuid(chat):
+        chat = str(uuid.uuid4())
+    chat_out = os.path.join(request.app["OUT"], chat)
+    os.makedirs(chat_out, exist_ok=True)
+    resume = os.path.exists(os.path.join(_claude_project_dir(), chat + ".jsonl"))
 
     pid, fd = pty.fork()
     if pid == 0:  # child
         os.chdir(ROOT)
-        os.environ["IMAGEGEN_OUT"] = request.app["OUT"]
+        os.environ["IMAGEGEN_OUT"] = chat_out
         os.environ["IMAGEGEN_REFS"] = request.app["REFS"]
         os.execvp("bash", ["bash", "-l"])
         os._exit(1)
@@ -419,8 +427,10 @@ async def pty_ws(request):
     loop = asyncio.get_event_loop()
     os.set_blocking(fd, False)
     # tu chay claude, in dir output cho de thay
+    flag = "--resume" if resume else "--session-id"
+    cmd = "claude %s %s --permission-mode auto" % (flag, chat)  # chat la uuid -> an toan
     os.write(fd, b'clear; echo "[studio] anh gen vao: $IMAGEGEN_OUT -> hien len gallery"; '
-                 b'claude --permission-mode auto\r')
+                 + cmd.encode() + b'\r')
 
     q = asyncio.Queue()
 

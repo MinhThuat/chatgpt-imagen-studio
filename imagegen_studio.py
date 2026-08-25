@@ -27,7 +27,6 @@ import sys
 import termios
 import time
 import urllib.parse
-import uuid
 from datetime import datetime
 
 from aiohttp import WSMsgType, web
@@ -302,13 +301,8 @@ async def gallery(request):
     """Liet ke anh gen (de quy), moi nhat truoc. Bo qua thu muc refs (anh input)."""
     refs = os.path.realpath(request.app["REFS"])
     trash = os.path.realpath(request.app["TRASH"])
-    chat = request.query.get("chat", "")
-    if _valid_uuid(chat):
-        roots = [os.path.join(request.app["OUT"], chat)]   # chi anh cua chat nay
-    else:
-        roots = _gallery_roots(request.app)
     seen, items = set(), []
-    for root in roots:
+    for root in _gallery_roots(request.app):
         if not os.path.isdir(root):
             continue
         for dp, dirs, files in os.walk(root):
@@ -341,46 +335,6 @@ async def gallery(request):
     return web.json_response(items[:300])
 
 
-async def chats(request):
-    """Danh sach chat: moi folder out/<uuid> co it nhat 1 anh = 1 chat.
-    Tieu de doc tu transcript Claude (cung uuid)."""
-    out = request.app["OUT"]
-    proj = _claude_project_dir()
-    try:
-        names = os.listdir(out)
-    except OSError:
-        names = []
-    items = []
-    for name in names:
-        if not _valid_uuid(name):
-            continue
-        folder = os.path.join(out, name)
-        if not os.path.isdir(folder):
-            continue
-        newest, count = None, 0
-        for dp, dirs, files in os.walk(folder):
-            for fn in files:
-                if os.path.splitext(fn)[1].lower() not in IMG_EXT:
-                    continue
-                fp = os.path.join(dp, fn)
-                try:
-                    mt = os.path.getmtime(fp)
-                except OSError:
-                    continue
-                count += 1
-                if newest is None or mt > newest[0]:
-                    newest = (mt, fp)
-        if not count:
-            continue
-        title = _chat_title(os.path.join(proj, name + ".jsonl")) \
-            or datetime.fromtimestamp(newest[0]).strftime("%Y-%m-%d %H:%M")
-        items.append({"id": name, "title": title, "count": count,
-                      "mtime": newest[0],
-                      "thumb_url": "/media?p=" + urllib.parse.quote(newest[1])})
-    items.sort(key=lambda x: x["mtime"], reverse=True)
-    return web.json_response(items)
-
-
 async def upload(request):
     """Luu 1 anh keo-tha. Body JSON {name, data(dataURL), subdir?}.
     Co subdir -> luu vao refs/<subdir>/ (giu nguyen dang folder)."""
@@ -401,113 +355,24 @@ async def upload(request):
     return web.json_response({"path": fp, "dir": base})
 
 
-def _valid_uuid(s):
-    """True neu s la uuid canonical (dung phan biet folder chat vs set thuong)."""
-    try:
-        return str(uuid.UUID(str(s))) == str(s).lower()
-    except (ValueError, AttributeError, TypeError):
-        return False
-
-
-def _claude_project_dir():
-    """Thu muc transcript Claude cho ROOT: ~/.claude/projects/<ROOT '/'&'.'->'->'-'>."""
-    enc = ROOT.replace("/", "-").replace(".", "-")
-    return os.path.join(HOME, ".claude", "projects", enc)
-
-
-def _chat_title(path, maxlen=60):
-    """Cau user text dau tien trong transcript jsonl -> tieu de chat. None neu khong co."""
-    try:
-        with open(path, encoding="utf-8", errors="replace") as f:
-            for line in f:
-                if '"user"' not in line:
-                    continue
-                try:
-                    o = json.loads(line)
-                except ValueError:
-                    continue
-                if o.get("type") != "user":
-                    continue
-                c = (o.get("message") or {}).get("content")
-                text = ""
-                if isinstance(c, str):
-                    text = c
-                elif isinstance(c, list):
-                    for b in c:
-                        if isinstance(b, dict) and b.get("type") == "text":
-                            text = b.get("text", "")
-                            break
-                        if isinstance(b, str):
-                            text = b
-                            break
-                text = text.strip()
-                if text:
-                    return text[:maxlen] + ("…" if len(text) > maxlen else "")
-    except OSError:
-        pass
-    return None
-
-
-def _resumable(path):
-    """True chi khi transcript co HOI THOAI that (>=1 dong message user/assistant).
-    Claude tao san 1 stub 'bridge-session' 146 byte khi phien chua kip sync noi dung;
-    `claude --resume` tren stub -> 'No conversation found' -> claude THOAT ve bash."""
-    try:
-        with open(path, encoding="utf-8", errors="replace") as f:
-            for line in f:
-                if '"type":"user"' in line or '"type":"assistant"' in line:
-                    return True
-    except OSError:
-        return False
-    return False
-
-
-def _claude_cmd(chat):
-    """Lenh claude cho 1 chat, tranh lam claude thoat ve bash:
-    - transcript co hoi thoai that -> --resume <chat> (khoi phuc dung phien).
-    - transcript stub (chi metadata) HOAC id da tung dung -> phien MOI id khac
-      (--session-id <chat> se bao 'Session ID ... already in use'; --resume -> 'No
-      conversation found'). Anh cu van hien vi gallery loc theo folder out/<chat>.
-    - chua tung dung (khong co file) -> --session-id <chat> (dat nen resume ve sau)."""
-    tpath = os.path.join(_claude_project_dir(), chat + ".jsonl")
-    if _resumable(tpath):
-        sid, flag = chat, "--resume"
-    elif os.path.exists(tpath):
-        sid, flag = str(uuid.uuid4()), "--session-id"
-    else:
-        sid, flag = chat, "--session-id"
-    primary = "claude %s %s --permission-mode auto" % (flag, sid)  # sid la uuid -> an toan
-    # LUOI AN TOAN: neu primary thoat loi (already in use / no conversation / bat ky) ->
-    # mo phien claude MOI thay vi de user ket o bash tran (Esc khong dung duoc gi).
-    return "%s || claude --permission-mode auto" % primary
-
-
 async def pty_ws(request):
-    """Cau noi terminal: spawn bash -> tu mo claude, bom byte 2 chieu qua WS.
-    ?chat=<uuid>: resume phien do neu da co transcript, khong thi tao moi voi id do."""
+    """Cau noi terminal: spawn bash -> tu mo claude, bom byte 2 chieu qua WS."""
     ws = web.WebSocketResponse()
     await ws.prepare(request)
-
-    chat = request.query.get("chat", "")
-    if not _valid_uuid(chat):
-        chat = str(uuid.uuid4())
-    chat_out = os.path.join(request.app["OUT"], chat)
-    os.makedirs(chat_out, exist_ok=True)
 
     pid, fd = pty.fork()
     if pid == 0:  # child
         os.chdir(ROOT)
-        os.environ["IMAGEGEN_OUT"] = chat_out
+        os.environ["IMAGEGEN_OUT"] = request.app["OUT"]
         os.environ["IMAGEGEN_REFS"] = request.app["REFS"]
         os.execvp("bash", ["bash", "-l"])
         os._exit(1)
 
     loop = asyncio.get_event_loop()
     os.set_blocking(fd, False)
-    # tu chay claude (chon --resume/--session-id sao cho khong lam claude thoat ve bash)
-    cmd = _claude_cmd(chat)
+    # tu chay claude, in dir output cho de thay
     os.write(fd, b'clear; echo "[studio] anh gen vao: $IMAGEGEN_OUT -> hien len gallery"; '
-                 + cmd.encode() + b'\r')
+                 b'claude --permission-mode auto\r')
 
     q = asyncio.Queue()
 
@@ -579,7 +444,6 @@ def main():
         web.get("/", index),
         web.get("/pty", pty_ws),
         web.get("/gallery", gallery),
-        web.get("/chats", chats),
         web.post("/upload", upload),
         web.get("/media", media),
         web.get("/reveal", reveal),

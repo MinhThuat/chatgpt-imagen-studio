@@ -61,34 +61,11 @@
     font-size:18px; color:var(--accent); pointer-events:none; }
   #top.drag #drop { display:flex; }
 
-  #sidebar-wrap { position:fixed; left:0; top:0; bottom:0; width:14px; z-index:16; }
-  #sidebar-wrap::before { content:""; position:absolute; left:0; top:0; bottom:0;
-    width:4px; background:var(--line); }
-  #sidebar-wrap:hover { width:280px; }
-  #sidebar { position:absolute; left:0; top:0; bottom:0; width:280px; background:var(--panel);
-    border-right:1px solid var(--line); box-shadow:4px 0 20px rgba(0,0,0,.4);
-    transform:translateX(-100%); transition:transform .18s; overflow-y:auto; padding:8px; }
-  #sidebar-wrap:hover #sidebar { transform:none; }
-  #sb-head { display:flex; gap:6px; margin-bottom:8px; }
-  #chatlist .item { display:flex; gap:8px; align-items:center; padding:6px; border-radius:8px;
-    cursor:pointer; border:1px solid transparent; }
-  #chatlist .item:hover { background:#20262f; }
-  #chatlist .item.active { border-color:var(--accent); }
-  #chatlist .item img { width:40px; height:40px; object-fit:cover; border-radius:5px;
-    border:1px solid var(--line); flex:none; background:#0d0f13; }
-  #chatlist .item .t { font-size:12px; color:var(--fg); overflow:hidden;
-    text-overflow:ellipsis; white-space:nowrap; }
-  #chatlist .item .c { font-size:11px; color:var(--mut); }
-
   #divider { height:6px; background:var(--line); cursor:row-resize; flex:0 0 auto; }
   #term { flex:0 0 44vh; min-height:120px; background:#000; padding:6px 8px; }
 </style>
 </head>
 <body>
-<div id="sidebar-wrap"><div id="sidebar">
-  <div id="sb-head"><button id="showall" title="Xem tat ca anh (moi chat)">Tất cả</button></div>
-  <div id="chatlist"></div>
-</div></div>
 <div id="app">
   <div id="top">
     <div id="bar">
@@ -98,7 +75,7 @@
       <span id="quota" title="Quota con lai"></span>
       <span id="cnt" style="color:var(--mut)"></span>
       <button id="restart" title="Code Studio da doi — bam de nap lai">↻ Restart (code moi)</button>
-      <button id="new">＋ Chat mới</button>
+      <button id="new">＋ New (xoa gallery)</button>
     </div>
     <div id="gallery"><div id="empty">Keo folder / anh vao day de lam reference.<br>Anh gen xong se hien o day.</div></div>
     <div id="drop">Tha ra de nap reference…</div>
@@ -118,25 +95,18 @@ term.loadAddon(fit);
 term.open(document.getElementById('term'));
 fit.fit();
 
+const ws = new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/pty');
+ws.binaryType = 'arraybuffer';
 const enc = new TextEncoder();
 let lastPasteLen = 0;   // do dai chuoi duong dan vua chen -> Ctrl+Z xoa dung bay nhieu ky tu
 let deletedCount = 0;   // so anh da chuyen vao thung rac trong phien -> Ctrl+Z khoi phuc
-let currentChat = crypto.randomUUID();   // moi lan mo trang = 1 chat moi
-let ws;
-const wsBase = (location.protocol==='https:'?'wss':'ws')+'://'+location.host;
 function sendResize(){ try { ws.send(JSON.stringify({resize:[term.cols, term.rows]})); } catch(e){} }
-function connect(chatId){
-  if (ws) { try { ws.onclose = null; ws.close(); } catch(e){} }
-  ws = new WebSocket(wsBase + '/pty?chat=' + chatId);
-  ws.binaryType = 'arraybuffer';
-  ws.onopen = () => { fit.fit(); sendResize(); term.focus(); };
-  ws.onmessage = e => term.write(new Uint8Array(e.data));
-  ws.onclose = () => term.write('\r\n[studio] terminal da dong.\r\n');
-}
+ws.onopen = () => { fit.fit(); sendResize(); term.focus(); };
+ws.onmessage = e => term.write(new Uint8Array(e.data));
+ws.onclose = () => term.write('\r\n[studio] terminal da dong.\r\n');
 term.onData(d => { lastPasteLen = 0;   // go phim khac -> huy bo dem undo-paste
-  if (ws && ws.readyState===1) ws.send(enc.encode(d)); });
+  if (ws.readyState===1) ws.send(enc.encode(d)); });
 new ResizeObserver(() => { fit.fit(); sendResize(); }).observe(document.getElementById('term'));
-connect(currentChat);
 
 // ---------- Divider keo doi cao terminal ----------
 const divider = document.getElementById('divider'), termEl = document.getElementById('term');
@@ -151,17 +121,15 @@ divider.onmousedown = e => {
 // ---------- Gallery (poll OUT, "/new" xoa view) ----------
 const gallery = document.getElementById('gallery'), empty = document.getElementById('empty'),
       cnt = document.getElementById('cnt');
+let clearedAt = parseFloat(localStorage.getItem('clearedAt') || '0');
 const shown = new Set();
 
 async function poll(){
-  const forChat = currentChat;                 // token captured before await
   try {
-    const url = forChat ? '/gallery?chat=' + forChat : '/gallery';
-    const list = await (await fetch(url)).json();
-    if (forChat !== currentChat) return;       // user switched chat mid-fetch -> stale response, drop it
+    const list = await (await fetch('/gallery')).json();
     // moi nhat truoc -> render nguoc de prepend giu thu tu
     for (const it of list.slice().reverse()) {
-      if (shown.has(it.url)) continue;
+      if (it.mtime <= clearedAt || shown.has(it.url)) continue;
       shown.add(it.url);
       empty.style.display = 'none';
       const enc = it.url.split('p=')[1];
@@ -243,46 +211,13 @@ restartBtn.onclick = async () => {
   setTimeout(() => location.reload(), 1500);
 };
 
-// ---------- Chat history: sidebar + resume + doi chat ----------
-function resetGallery(){
+document.getElementById('new').onclick = () => {
+  clearedAt = Date.now()/1000;
+  localStorage.setItem('clearedAt', clearedAt);
   shown.clear();
   [...gallery.querySelectorAll('a')].forEach(a => a.remove());
   empty.style.display = ''; cnt.textContent = '';
-}
-function openChat(id){          // bam 1 chat cu -> resume + loc gallery
-  if (id === currentChat) return;
-  currentChat = id;
-  term.reset(); connect(id);
-  resetGallery(); poll(); renderActive();
-}
-function newChat(){ openChat(crypto.randomUUID()); }   // nut "Chat moi"
-function showAll(){ currentChat = null; resetGallery(); poll(); renderActive(); }
-
-const chatlist = document.getElementById('chatlist');
-let chatsCache = [];
-function renderActive(){
-  [...chatlist.querySelectorAll('.item')].forEach((el, i) =>
-    el.classList.toggle('active', chatsCache[i] && chatsCache[i].id === currentChat));
-}
-async function loadChats(){
-  try { chatsCache = await (await fetch('/chats')).json(); } catch(e){ return; }
-  chatlist.innerHTML = '';
-  for (const ch of chatsCache) {
-    const d = document.createElement('div');
-    d.className = 'item' + (ch.id === currentChat ? ' active' : '');
-    d.onclick = () => openChat(ch.id);
-    const img = document.createElement('img'); img.src = ch.thumb_url; img.loading = 'lazy';
-    const box = document.createElement('div'); box.style.minWidth = '0';
-    const t = document.createElement('div'); t.className = 't'; t.textContent = ch.title; t.title = ch.title;
-    const c = document.createElement('div'); c.className = 'c'; c.textContent = ch.count + ' anh';
-    box.appendChild(t); box.appendChild(c);
-    d.appendChild(img); d.appendChild(box);
-    chatlist.appendChild(d);
-  }
-}
-document.getElementById('new').onclick = newChat;
-document.getElementById('showall').onclick = showAll;
-loadChats(); setInterval(loadChats, 5000);
+};
 
 // ---------- Keo-tha reference (anh + folder) ----------
 const topPane = document.getElementById('top'), refsBar = document.getElementById('refs');

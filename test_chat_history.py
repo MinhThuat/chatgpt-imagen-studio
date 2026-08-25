@@ -78,14 +78,16 @@ def test_claude_cmd_picks_flag(monkeypatch=None):
         with open(os.path.join(d, realid + ".jsonl"), "w") as f:
             f.write(json.dumps({"type": "user", "message": {"content": "hi"}},
                                separators=(",", ":")) + "\n")
+        FB = " || claude --permission-mode auto"   # luoi an toan luon duoc noi vao
         # chua tung dung -> --session-id chinh chat (dat nen resume sau)
-        assert S._claude_cmd(absent) == "claude --session-id %s --permission-mode auto" % absent
+        assert S._claude_cmd(absent) == "claude --session-id %s --permission-mode auto" % absent + FB
         # co hoi thoai that -> --resume chinh chat
-        assert S._claude_cmd(realid) == "claude --resume %s --permission-mode auto" % realid
+        assert S._claude_cmd(realid) == "claude --resume %s --permission-mode auto" % realid + FB
         # stub -> --session-id NHUNG id KHAC (khong phai chat) -> tranh 'already in use'
         c = S._claude_cmd(stubbed)
-        assert c.startswith("claude --session-id ") and c.endswith("--permission-mode auto")
+        assert c.startswith("claude --session-id ") and c.endswith(FB)
         assert stubbed not in c and S._valid_uuid(c.split()[2])
+        assert S._claude_cmd(absent).endswith(FB)   # luoi an toan co mat
     finally:
         S._claude_project_dir = orig
 

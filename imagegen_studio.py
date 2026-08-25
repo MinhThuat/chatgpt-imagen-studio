@@ -476,7 +476,10 @@ def _claude_cmd(chat):
         sid, flag = str(uuid.uuid4()), "--session-id"
     else:
         sid, flag = chat, "--session-id"
-    return "claude %s %s --permission-mode auto" % (flag, sid)  # sid la uuid -> an toan
+    primary = "claude %s %s --permission-mode auto" % (flag, sid)  # sid la uuid -> an toan
+    # LUOI AN TOAN: neu primary thoat loi (already in use / no conversation / bat ky) ->
+    # mo phien claude MOI thay vi de user ket o bash tran (Esc khong dung duoc gi).
+    return "%s || claude --permission-mode auto" % primary
 
 
 async def pty_ws(request):

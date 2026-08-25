@@ -20,8 +20,11 @@ update_once() {
   # KHONG bao gio nuot cong viec local: bo qua reset neu co thay doi chua commit
   # hoac local di TRUOC/re nhanh so voi origin (may tac gia). Chi reset khi local
   # thuc su di SAU origin (may user thuan tuy tieu thu).
-  if [ -n "$(git status --porcelain)" ]; then
-    echo "[autoupdate] co thay doi chua commit — bo qua tu cap nhat."; return 0
+  # Chi chan neu co thay doi file DA TRACK; file LA (run_*.sh Claude sinh de gen anh,
+  # rac NTFS .fuse_hidden*) khong tinh -> autoupdate van pull duoc. `git reset --hard`
+  # khong dung toi file untracked nen an toan.
+  if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+    echo "[autoupdate] co thay doi file da track chua commit — bo qua tu cap nhat."; return 0
   fi
   base="$(git merge-base HEAD "origin/$BRANCH" 2>/dev/null)"
   if [ "$base" != "$local_h" ]; then

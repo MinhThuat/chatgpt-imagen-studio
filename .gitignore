@@ -2,3 +2,7 @@ __pycache__/
 *.pyc
 refresh.log
 .codegraph/
+run_*.sh
+.fuse_hidden*
+.Trash-*
+*.tmp

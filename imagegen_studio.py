@@ -448,6 +448,37 @@ def _chat_title(path, maxlen=60):
     return None
 
 
+def _resumable(path):
+    """True chi khi transcript co HOI THOAI that (>=1 dong message user/assistant).
+    Claude tao san 1 stub 'bridge-session' 146 byte khi phien chua kip sync noi dung;
+    `claude --resume` tren stub -> 'No conversation found' -> claude THOAT ve bash."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if '"type":"user"' in line or '"type":"assistant"' in line:
+                    return True
+    except OSError:
+        return False
+    return False
+
+
+def _claude_cmd(chat):
+    """Lenh claude cho 1 chat, tranh lam claude thoat ve bash:
+    - transcript co hoi thoai that -> --resume <chat> (khoi phuc dung phien).
+    - transcript stub (chi metadata) HOAC id da tung dung -> phien MOI id khac
+      (--session-id <chat> se bao 'Session ID ... already in use'; --resume -> 'No
+      conversation found'). Anh cu van hien vi gallery loc theo folder out/<chat>.
+    - chua tung dung (khong co file) -> --session-id <chat> (dat nen resume ve sau)."""
+    tpath = os.path.join(_claude_project_dir(), chat + ".jsonl")
+    if _resumable(tpath):
+        sid, flag = chat, "--resume"
+    elif os.path.exists(tpath):
+        sid, flag = str(uuid.uuid4()), "--session-id"
+    else:
+        sid, flag = chat, "--session-id"
+    return "claude %s %s --permission-mode auto" % (flag, sid)  # sid la uuid -> an toan
+
+
 async def pty_ws(request):
     """Cau noi terminal: spawn bash -> tu mo claude, bom byte 2 chieu qua WS.
     ?chat=<uuid>: resume phien do neu da co transcript, khong thi tao moi voi id do."""
@@ -459,7 +490,6 @@ async def pty_ws(request):
         chat = str(uuid.uuid4())
     chat_out = os.path.join(request.app["OUT"], chat)
     os.makedirs(chat_out, exist_ok=True)
-    resume = os.path.exists(os.path.join(_claude_project_dir(), chat + ".jsonl"))
 
     pid, fd = pty.fork()
     if pid == 0:  # child
@@ -471,9 +501,8 @@ async def pty_ws(request):
 
     loop = asyncio.get_event_loop()
     os.set_blocking(fd, False)
-    # tu chay claude, in dir output cho de thay
-    flag = "--resume" if resume else "--session-id"
-    cmd = "claude %s %s --permission-mode auto" % (flag, chat)  # chat la uuid -> an toan
+    # tu chay claude (chon --resume/--session-id sao cho khong lam claude thoat ve bash)
+    cmd = _claude_cmd(chat)
     os.write(fd, b'clear; echo "[studio] anh gen vao: $IMAGEGEN_OUT -> hien len gallery"; '
                  + cmd.encode() + b'\r')
 

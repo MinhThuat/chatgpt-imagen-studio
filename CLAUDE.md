@@ -37,6 +37,13 @@ SRC="$HOME/imagegen_studio/refs/ten_folder_ref"      # folder ref user kéo vào
 OUT="${IMAGEGEN_OUT:-$HOME/imagegen_studio/out}/ten_set"
 mkdir -p "$OUT"
 
+# Preflight: token codex con song? Neu refresh_token chet han -> tu login MOT lan
+# (truoc batch, tranh 4 request song song cung bung login). login.sh mo browser -> can nguoi bam.
+if ! python3 refresh_token.py >/dev/null 2>&1; then
+  echo "!! codex het han -> mo dang nhap lai (bam trong browser)..."
+  ./login.sh || { echo "login that bai -> dung."; exit 1; }
+fi
+
 PROMPT="Mo ta anh can gen bang tieng Anh, chi tiet..."
 
 gen_one() {

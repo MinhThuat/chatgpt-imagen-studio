@@ -14,20 +14,22 @@ thang vao o nhap cua terminal (Claude nhin thay ngay).
 import argparse
 import asyncio
 import base64
-import fcntl
 import json
 import os
-import pty
 import shutil
 import signal
 import subprocess
 import glob
 import struct
 import sys
-import termios
 import time
 import urllib.parse
 from datetime import datetime
+
+if sys.platform != "win32":
+    import fcntl
+    import pty
+    import termios  # noqa: F401  (Unix-only; nhanh Windows dung winpty)
 
 from aiohttp import WSMsgType, web
 
@@ -67,7 +69,10 @@ async def reveal(request):
     if not any(p == r or p.startswith(r + os.sep) for r in request.app["ROOTS"]) \
             or not os.path.isfile(p):
         return web.Response(status=404, text="not found")
-    subprocess.Popen(["xdg-open", os.path.dirname(p)])
+    if sys.platform == "win32":
+        os.startfile(os.path.dirname(p))  # noqa: E501 (Windows-only)
+    else:
+        subprocess.Popen(["xdg-open", os.path.dirname(p)])
     return web.Response(text="ok")
 
 
@@ -355,11 +360,87 @@ async def upload(request):
     return web.json_response({"path": fp, "dir": base})
 
 
+# Lenh tu chay khi terminal mo: in dir output roi bat claude (auto-approve).
+_BOOT = ('clear; echo "[studio] anh gen vao: $IMAGEGEN_OUT -> hien len gallery"; '
+         'claude --permission-mode auto\r')
+
+
 async def pty_ws(request):
-    """Cau noi terminal: spawn bash -> tu mo claude, bom byte 2 chieu qua WS."""
+    """Cau noi terminal <-> WebSocket. Linux/macOS: pty.fork. Windows: winpty."""
     ws = web.WebSocketResponse()
     await ws.prepare(request)
+    if sys.platform == "win32":
+        return await _pty_ws_win(request, ws)
+    return await _pty_ws_unix(request, ws)
 
+
+async def _pty_ws_win(request, ws):
+    """Windows: spawn Git Bash qua pywinpty, doc trong thread (winpty blocking)."""
+    import threading
+    try:
+        from winpty import PtyProcess
+    except ImportError:
+        await ws.send_bytes(b"[studio] Thieu pywinpty. Chay: pip install pywinpty\r\n")
+        await ws.close()
+        return ws
+    bash = shutil.which("bash") or shutil.which("bash.exe")
+    if not bash:
+        await ws.send_bytes(b"[studio] Khong tim thay Git Bash. Cai Git for Windows "
+                            b"(bat 'Add to PATH') roi mo lai.\r\n")
+        await ws.close()
+        return ws
+
+    env = dict(os.environ)
+    env["IMAGEGEN_OUT"] = request.app["OUT"]
+    env["IMAGEGEN_REFS"] = request.app["REFS"]
+    proc = PtyProcess.spawn([bash, "-l"], cwd=ROOT, env=env)
+    proc.write(_BOOT)
+
+    loop = asyncio.get_event_loop()
+    q = asyncio.Queue()
+
+    def reader():  # winpty read la blocking -> chay o thread rieng
+        while True:
+            try:
+                data = proc.read(65536)
+            except EOFError:
+                data = ""
+            except Exception:
+                data = ""
+            loop.call_soon_threadsafe(q.put_nowait, data)
+            if not data:
+                break
+
+    threading.Thread(target=reader, daemon=True).start()
+
+    async def pty_to_ws():
+        while True:
+            data = await q.get()
+            if not data:  # child da thoat
+                break
+            await ws.send_bytes(data.encode("utf-8", "replace"))
+
+    pump = asyncio.ensure_future(pty_to_ws())
+    try:
+        async for msg in ws:
+            if msg.type == WSMsgType.BINARY:
+                proc.write(msg.data.decode("utf-8", "replace"))
+            elif msg.type == WSMsgType.TEXT:
+                m = json.loads(msg.data)
+                if "resize" in m:
+                    cols, rows = m["resize"]
+                    proc.setwinsize(rows, cols)
+    finally:
+        pump.cancel()
+        try:
+            proc.terminate(force=True)
+        except Exception:
+            pass
+    return ws
+
+
+async def _pty_ws_unix(request, ws):
+    """Linux/macOS: spawn bash -> tu mo claude, bom byte 2 chieu qua WS."""
     pid, fd = pty.fork()
     if pid == 0:  # child
         os.chdir(ROOT)
@@ -371,8 +452,7 @@ async def pty_ws(request):
     loop = asyncio.get_event_loop()
     os.set_blocking(fd, False)
     # tu chay claude, in dir output cho de thay
-    os.write(fd, b'clear; echo "[studio] anh gen vao: $IMAGEGEN_OUT -> hien len gallery"; '
-                 b'claude --permission-mode auto\r')
+    os.write(fd, _BOOT.encode())
 
     q = asyncio.Queue()
 

@@ -11,3 +11,6 @@
 
 aiohttp>=3.9
 python-dotenv>=1.0
+
+# Chi Windows: cau noi terminal (Linux/macOS dung pty/termios stdlib, khong can).
+pywinpty>=2.0; sys_platform == "win32"

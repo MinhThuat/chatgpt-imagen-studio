@@ -362,7 +362,7 @@ async def upload(request):
 
 # Lenh tu chay khi terminal mo: in dir output roi bat claude (auto-approve).
 _BOOT = ('clear; echo "[studio] anh gen vao: $IMAGEGEN_OUT -> hien len gallery"; '
-         'claude --permission-mode auto\r')
+         'claude --permission-mode bypassPermissions\r')
 
 
 async def pty_ws(request):

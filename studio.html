@@ -55,6 +55,8 @@
   #gallery a:hover .del { opacity:1; }
   #gallery .del:hover { background:#7a1f1f; border-color:#e06; color:#fff; }
   #restart { display:none; background:#4a2f10; border-color:#e0902e; color:#ffcf8a; }
+  #rerun { display:none; padding:4px 9px; border:1px solid #c0392b; border-radius:6px;
+    background:#3a1512; color:#ff9a8a; font-size:13px; }
   #empty { color:var(--mut); grid-column:1/-1; text-align:center; padding:60px 0; }
   #drop { position:absolute; inset:0; display:none; align-items:center; justify-content:center;
     background:rgba(110,168,254,.12); border:3px dashed var(--accent); z-index:5;
@@ -75,6 +77,7 @@
       <span id="quota" title="Quota con lai"></span>
       <span id="cnt" style="color:var(--mut)"></span>
       <button id="restart" title="Code Studio da doi — bam de nap lai">↻ Restart (code moi)</button>
+      <span id="rerun" title="Launcher (Studio.sh/.bat) da doi — dong terminal Studio va chay lai ./Studio.sh">⚠ Dong &amp; chay lai Studio.sh</span>
       <button id="new">＋ New (xoa gallery)</button>
     </div>
     <div id="gallery"><div id="empty">Keo folder / anh vao day de lam reference.<br>Anh gen xong se hien o day.</div></div>
@@ -193,13 +196,18 @@ pollQuota(); setInterval(pollQuota, 30000);
 
 // ---------- Bao code doi + restart server ----------
 const restartBtn = document.getElementById('restart');
-let notified = false;
+const rerunEl = document.getElementById('rerun');
+let notifiedReload = false, notifiedRerun = false;
 async function checkVersion(){
   try {
     const v = await (await fetch('/version')).json();
-    if (v.stale) {
+    if (v.reload) {
       restartBtn.style.display = 'inline-block';
-      if (!notified) { notified = true; toast('Code Studio da cap nhat — bam ↻ Restart de nap lai'); }
+      if (!notifiedReload) { notifiedReload = true; toast('Code Studio da cap nhat — bam ↻ Restart de nap lai'); }
+    }
+    if (v.rerun) {
+      rerunEl.style.display = 'inline-block';
+      if (!notifiedRerun) { notifiedRerun = true; toast('Launcher da doi — DONG terminal Studio va chay lai ./Studio.sh de ap dung'); }
     }
   } catch(e){}
 }

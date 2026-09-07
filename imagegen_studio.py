@@ -41,12 +41,16 @@ MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
         ".webp": "image/webp", ".gif": "image/gif"}
 IMG_EXT = set(MIME)
 
-# source code cua Studio -> phat hien khi code doi de nhac restart
-SRC = [os.path.join(ROOT, f) for f in ("imagegen_studio.py", "studio.html")]
+# source code cua Studio -> phat hien khi code doi de nhac restart.
+# RELOAD_SRC: server co the tu nap lai bang re-exec Python (nut ↻ Restart).
+# RERUN_SRC: launcher (set env) -> phai DONG + chay lai Studio.sh/.bat, nut khong lam duoc.
+# CLI chatgpt-imagegen KHONG theo doi: no spawn moi moi lan gen nen tu ap dung.
+RELOAD_SRC = [os.path.join(ROOT, f) for f in ("imagegen_studio.py", "studio.html")]
+RERUN_SRC = [os.path.join(ROOT, f) for f in ("Studio.sh", "Studio.bat")]
 
 
-def _src_mtime():
-    return max((os.path.getmtime(f) for f in SRC if os.path.exists(f)), default=0)
+def _mtime(files):
+    return max((os.path.getmtime(f) for f in files if os.path.exists(f)), default=0)
 
 
 async def index(request):
@@ -128,7 +132,10 @@ async def undo(request):
 
 async def version(request):
     """Bao cho UI biet code da doi so voi luc server khoi dong -> can restart."""
-    return web.json_response({"stale": _src_mtime() > request.app["SRC_MTIME"]})
+    return web.json_response({
+        "reload": _mtime(RELOAD_SRC) > request.app["RELOAD_MTIME"],  # py/html -> nut ↻ Restart
+        "rerun": _mtime(RERUN_SRC) > request.app["RERUN_MTIME"],     # launcher -> dong & chay lai Studio.sh
+    })
 
 
 async def restart(request):
@@ -517,7 +524,8 @@ def main():
     app["OUT"], app["REFS"] = out, refs
     app["TRASH"] = os.path.join(os.path.dirname(out), ".trash")
     app["TRASHLOG"] = os.path.join(app["TRASH"], "undo_log.tsv")
-    app["SRC_MTIME"] = _src_mtime()
+    app["RELOAD_MTIME"] = _mtime(RELOAD_SRC)
+    app["RERUN_MTIME"] = _mtime(RERUN_SRC)
     # cac goc duoc phep phuc vu anh: ca thu muc studio (chua out*/refs) + project
     app["ROOTS"] = [os.path.realpath(p) for p in (os.path.dirname(out), ROOT)]
     app.add_routes([

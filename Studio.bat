@@ -7,6 +7,9 @@ call "%~dp0_env.bat"
 set "PORT=%~1"
 if "%PORT%"=="" set "PORT=8760"
 
+REM Model codex mac dinh (gpt-5.5 da bi go). Doi o day -> terminal + moi script gen con deu thua huong.
+if "%CHATGPT_IMAGEGEN_MODEL%"=="" set "CHATGPT_IMAGEGEN_MODEL=gpt-5.6-sol"
+
 REM Tu cap nhat code moi tu git moi 60s (chay autoupdate.sh qua Git Bash o nen).
 where bash >nul 2>&1 && start "" /b bash autoupdate.sh
 

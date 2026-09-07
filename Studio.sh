@@ -5,6 +5,9 @@ cd "$(dirname "$0")"
 PORT="${1:-8760}"
 URL="http://127.0.0.1:$PORT"
 
+# Model codex mac dinh (gpt-5.5 da bi go). Doi o day -> terminal + moi script gen con deu thua huong.
+export CHATGPT_IMAGEGEN_MODEL="${CHATGPT_IMAGEGEN_MODEL:-gpt-5.6-sol}"
+
 # Tu cap nhat code moi tu git moi 60s (neu la git repo). CLI tu refresh access
 # token moi lan gen -> khong can vong refresh nen; chi khi refresh_token chet han
 # moi phai `codex login` lai (xem login.sh).

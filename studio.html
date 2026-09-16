@@ -125,21 +125,28 @@ divider.onmousedown = e => {
 const gallery = document.getElementById('gallery'), empty = document.getElementById('empty'),
       cnt = document.getElementById('cnt');
 let clearedAt = parseFloat(localStorage.getItem('clearedAt') || '0');
-const shown = new Set();
+const shown = new Map();   // url -> mtime da render (mtime doi = anh gen de len path cu -> refresh)
 
 async function poll(){
   try {
     const list = await (await fetch('/gallery')).json();
     // moi nhat truoc -> render nguoc de prepend giu thu tu
     for (const it of list.slice().reverse()) {
-      if (it.mtime <= clearedAt || shown.has(it.url)) continue;
-      shown.add(it.url);
+      if (it.mtime <= clearedAt) continue;
+      const prev = shown.get(it.url);
+      if (prev === it.mtime) continue;            // da render, chua doi -> bo qua
+      shown.set(it.url, it.mtime);
+      const bust = it.url + '&v=' + it.mtime;      // busts browser cache khi file bi ghi de
+      if (prev !== undefined) {                    // anh gen de len path cu -> chi thay src, khong them tile
+        const ex = gallery.querySelector('img[data-url="' + CSS.escape(it.url) + '"]');
+        if (ex) { ex.src = bust; continue; }
+      }
       empty.style.display = 'none';
       const enc = it.url.split('p=')[1];
       const a = document.createElement('a');
       a.href = '#'; a.title = 'Mo thu muc chua anh: ' + it.name;
       a.onclick = (e) => { e.preventDefault(); fetch('/reveal?p=' + enc); };
-      const img = document.createElement('img'); img.src = it.url; img.loading = 'lazy';
+      const img = document.createElement('img'); img.src = bust; img.dataset.url = it.url; img.loading = 'lazy';
       const del = document.createElement('button');
       del.className = 'del'; del.textContent = '🗑'; del.title = 'Xoa anh (xoa ca file tren o dia)';
       del.onclick = (e) => {

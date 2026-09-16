@@ -10,6 +10,11 @@ cd "$(dirname "$0")"
 BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" || {
   echo "[autoupdate] khong phai git repo — bo qua."; exit 0; }
 
+# NTFS (/mnt) khong giu bit thuc thi -> git thay mode 644->755 va bao MOI file
+# "modified" gia. Guard duoi se tuong nham la user sua code roi chan pull mai.
+# Tat filemode -> git bo qua doi bit exec (chi con diff noi dung that moi chan).
+git config core.filemode false 2>/dev/null
+
 update_once() {
   git fetch -q origin "$BRANCH" 2>/dev/null || return 0   # mat mang -> thu lai sau
   local local_h remote_h base

@@ -126,16 +126,43 @@ const gallery = document.getElementById('gallery'), empty = document.getElementB
       cnt = document.getElementById('cnt');
 let clearedAt = parseFloat(localStorage.getItem('clearedAt') || '0');
 const shown = new Map();   // url -> mtime da render (mtime doi = anh gen de len path cu -> refresh)
+// Bao tren tab: anh moi khi tab khong duoc xem -> "(N) Imagegen Studio" + desktop notification
+let booted = false, unseen = 0;
+const baseTitle = document.title;
+let actx = null;             // AudioContext chi tao duoc sau 1 cu click (chinh sach autoplay)
+function ting(){
+  if (!actx) return;
+  const o = actx.createOscillator(), g = actx.createGain(), t = actx.currentTime;
+  o.type = 'sine'; o.frequency.setValueAtTime(1320, t);
+  g.gain.setValueAtTime(0.25, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
+  o.connect(g).connect(actx.destination); o.start(t); o.stop(t + 0.6);
+}
+function notifyNew(n){
+  if (!booted || !n) return;
+  ting();
+  if (!document.hidden) return;
+  unseen += n; document.title = '(' + unseen + ') ✅ ' + baseTitle;
+  if (window.Notification && Notification.permission === 'granted')
+    new Notification('Imagegen Studio', {body: 'Gen xong ' + unseen + ' anh moi', tag: 'imagegen'});
+}
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) { unseen = 0; document.title = baseTitle; }
+});
+document.addEventListener('click', () => {
+  try { actx = new AudioContext(); } catch(e){}
+  if (window.Notification && Notification.permission === 'default') Notification.requestPermission();
+}, {once: true});
 
 async function poll(){
   try {
     const list = await (await fetch('/gallery')).json();
+    let fresh = 0;
     // moi nhat truoc -> render nguoc de prepend giu thu tu
     for (const it of list.slice().reverse()) {
       if (it.mtime <= clearedAt) continue;
       const prev = shown.get(it.url);
       if (prev === it.mtime) continue;            // da render, chua doi -> bo qua
-      shown.set(it.url, it.mtime);
+      shown.set(it.url, it.mtime); fresh++;
       const bust = it.url + '&v=' + it.mtime;      // busts browser cache khi file bi ghi de
       if (prev !== undefined) {                    // anh gen de len path cu -> chi thay src, khong them tile
         const ex = gallery.querySelector('img[data-url="' + CSS.escape(it.url) + '"]');
@@ -170,6 +197,7 @@ async function poll(){
       gallery.insertBefore(a, gallery.firstChild);
     }
     cnt.textContent = shown.size ? shown.size + ' anh' : '';
+    notifyNew(fresh); booted = true;
   } catch(e){}
 }
 poll(); setInterval(poll, 2000);

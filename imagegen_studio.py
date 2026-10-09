@@ -385,7 +385,7 @@ async def _pty_ws_win(request, ws):
     """Windows: spawn Git Bash qua pywinpty, doc trong thread (winpty blocking)."""
     import threading
     try:
-        from winpty import PtyProcess
+        from winpty import PTY
     except ImportError:
         await ws.send_bytes(b"[studio] Thieu pywinpty. Chay: pip install pywinpty\r\n")
         await ws.close()
@@ -400,19 +400,23 @@ async def _pty_ws_win(request, ws):
     env = dict(os.environ)
     env["IMAGEGEN_OUT"] = request.app["OUT"]
     env["IMAGEGEN_REFS"] = request.app["REFS"]
-    proc = PtyProcess.spawn([bash, "-l"], cwd=ROOT, env=env)
+    # Dung PTY thap cap, KHONG dung PtyProcess: PtyProcess chuyen output qua 1 socket
+    # loopback (thread rieng + sleep 1ms + Nagle) -> go phim tre, chu hien tung cum.
+    proc = PTY(80, 24)
+    proc.spawn(bash, cmdline=" -l", cwd=ROOT,
+               env="\0".join("%s=%s" % kv for kv in env.items()) + "\0")
     proc.write(_BOOT)
 
     loop = asyncio.get_event_loop()
     q = asyncio.Queue()
 
-    def reader():  # winpty read la blocking -> chay o thread rieng
+    def reader():  # read(blocking=True) nha GIL -> chay o thread rieng
         while True:
             try:
-                data = proc.read(65536)
-            except EOFError:
-                data = ""
-            except Exception:
+                data = proc.read(blocking=True)
+                if not data and not proc.iseof() and proc.isalive():
+                    continue
+            except Exception:  # EOF / pty da dong
                 data = ""
             loop.call_soon_threadsafe(q.put_nowait, data)
             if not data:
@@ -436,11 +440,12 @@ async def _pty_ws_win(request, ws):
                 m = json.loads(msg.data)
                 if "resize" in m:
                     cols, rows = m["resize"]
-                    proc.setwinsize(rows, cols)
+                    proc.set_size(cols, rows)
     finally:
         pump.cancel()
         try:
-            proc.terminate(force=True)
+            os.kill(proc.pid, signal.SIGTERM)  # Windows: TerminateProcess
+            proc.cancel_io()
         except Exception:
             pass
     return ws
@@ -507,6 +512,20 @@ async def _pty_ws_unix(request, ws):
     return ws
 
 
+@web.middleware
+async def local_only(request, handler):
+    """Chi nhan request tu chinh trang Studio. Khong co check nay, 1 trang web la bat ky
+    dang mo trong trinh duyet co the noi WebSocket toi /pty (WS khong bi CORS chan)
+    -> chiem shell + claude bypassPermissions. Check Host chan them DNS rebinding."""
+    port = request.app["PORT"]
+    hosts = {"127.0.0.1:%d" % port, "localhost:%d" % port}
+    origin = request.headers.get("Origin")
+    if request.host not in hosts or (origin is not None and
+                                     origin not in {"http://" + h for h in hosts}):
+        return web.Response(status=403, text="forbidden")
+    return await handler(request)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8760)
@@ -520,7 +539,8 @@ def main():
     os.makedirs(refs, exist_ok=True)
 
     # anh mockup that thuong 1-8MB, base64 phinh them 33% -> noi gioi han body.
-    app = web.Application(client_max_size=100 * 1024 * 1024)
+    app = web.Application(client_max_size=100 * 1024 * 1024, middlewares=[local_only])
+    app["PORT"] = a.port
     app["OUT"], app["REFS"] = out, refs
     app["TRASH"] = os.path.join(os.path.dirname(out), ".trash")
     app["TRASHLOG"] = os.path.join(app["TRASH"], "undo_log.tsv")
@@ -534,8 +554,8 @@ def main():
         web.get("/gallery", gallery),
         web.post("/upload", upload),
         web.get("/media", media),
-        web.get("/reveal", reveal),
-        web.get("/delete", delete),
+        web.post("/reveal", reveal),
+        web.post("/delete", delete),
         web.post("/undo", undo),
         web.get("/version", version),
         web.get("/quota", quota),

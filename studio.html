@@ -172,14 +172,14 @@ async function poll(){
       const enc = it.url.split('p=')[1];
       const a = document.createElement('a');
       a.href = '#'; a.title = 'Mo thu muc chua anh: ' + it.name;
-      a.onclick = (e) => { e.preventDefault(); fetch('/reveal?p=' + enc); };
+      a.onclick = (e) => { e.preventDefault(); fetch('/reveal?p=' + enc, {method:'POST'}); };
       const img = document.createElement('img'); img.src = bust; img.dataset.url = it.url; img.loading = 'lazy';
       const del = document.createElement('button');
       del.className = 'del'; del.textContent = '🗑'; del.title = 'Xoa anh (xoa ca file tren o dia)';
       del.onclick = (e) => {
         e.preventDefault(); e.stopPropagation();
         if (!confirm('Xoa han file ' + it.name + ' ?')) return;
-        fetch('/delete?p=' + enc).then(r => {
+        fetch('/delete?p=' + enc, {method:'POST'}).then(r => {
           if (!r.ok) { toast('Xoa that bai: ' + it.name); return; }
           a.remove(); shown.delete(it.url); deletedCount++;
           cnt.textContent = shown.size ? shown.size + ' anh' : '';

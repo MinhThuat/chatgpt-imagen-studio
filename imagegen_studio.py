@@ -310,11 +310,18 @@ def _gallery_roots(app):
 
 
 async def gallery(request):
+    # quet dia o thread rieng: chay tren event loop thi moi 2s terminal bi dung hinh
+    # (Windows + Defender: mo tung file .txt rat cham) -> go phim tre, chu hien tung cum.
+    loop = asyncio.get_event_loop()
+    return web.json_response(await loop.run_in_executor(None, _scan_gallery, request.app))
+
+
+def _scan_gallery(app):
     """Liet ke anh gen (de quy), moi nhat truoc. Bo qua thu muc refs (anh input)."""
-    refs = os.path.realpath(request.app["REFS"])
-    trash = os.path.realpath(request.app["TRASH"])
+    refs = os.path.realpath(app["REFS"])
+    trash = os.path.realpath(app["TRASH"])
     seen, items = set(), []
-    for root in _gallery_roots(request.app):
+    for root in _gallery_roots(app):
         if not os.path.isdir(root):
             continue
         for dp, dirs, files in os.walk(root):
@@ -344,7 +351,7 @@ async def gallery(request):
                 except OSError:
                     pass
     items.sort(key=lambda x: x["mtime"], reverse=True)
-    return web.json_response(items[:300])
+    return items[:300]
 
 
 async def upload(request):
@@ -386,6 +393,8 @@ async def _pty_ws_win(request, ws):
     import threading
     try:
         from winpty import PTY
+        import winpty
+        print("[studio] pywinpty %s" % getattr(winpty, "__version__", "?"), flush=True)
     except ImportError:
         await ws.send_bytes(b"[studio] Thieu pywinpty. Chay: pip install pywinpty\r\n")
         await ws.close()
@@ -512,6 +521,20 @@ async def _pty_ws_unix(request, ws):
     return ws
 
 
+async def _lag_watch(app):
+    """Chan doan: in ra khi event loop bi nghen >150ms (terminal se tre dung bang do)."""
+    async def watch():
+        while True:
+            t = time.perf_counter()
+            await asyncio.sleep(0.1)
+            lag = time.perf_counter() - t - 0.1
+            if lag > 0.15:
+                print("[studio] server nghen %.0f ms" % (lag * 1000), flush=True)
+    task = asyncio.ensure_future(watch())
+    yield
+    task.cancel()
+
+
 @web.middleware
 async def local_only(request, handler):
     """Chi nhan request tu chinh trang Studio. Khong co check nay, 1 trang web la bat ky
@@ -541,6 +564,7 @@ def main():
     # anh mockup that thuong 1-8MB, base64 phinh them 33% -> noi gioi han body.
     app = web.Application(client_max_size=100 * 1024 * 1024, middlewares=[local_only])
     app["PORT"] = a.port
+    app.cleanup_ctx.append(_lag_watch)
     app["OUT"], app["REFS"] = out, refs
     app["TRASH"] = os.path.join(os.path.dirname(out), ".trash")
     app["TRASHLOG"] = os.path.join(app["TRASH"], "undo_log.tsv")

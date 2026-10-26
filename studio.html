@@ -110,6 +110,19 @@ ws.onclose = () => term.write('\r\n[studio] terminal da dong.\r\n');
 term.onData(d => { lastPasteLen = 0;   // go phim khac -> huy bo dem undo-paste
   if (ws.readyState===1) ws.send(enc.encode(d)); });
 new ResizeObserver(() => { fit.fit(); sendResize(); }).observe(document.getElementById('term'));
+// Copy/paste kieu Windows: xterm mac dinh gui Ctrl+C = ^C, Ctrl+V = ^V vao PTY.
+// Ctrl+C khi dang boi den -> copy (khong boi den thi van la ^C ngat Claude);
+// Ctrl+V / Ctrl+Shift+V -> return false de trinh duyet ban su kien paste, xterm tu chen text.
+term.attachCustomKeyEventHandler(e => {
+  if (e.type !== 'keydown' || !(e.ctrlKey || e.metaKey)) return true;
+  const k = e.key.toLowerCase();
+  if (k === 'c' && term.hasSelection()) {
+    navigator.clipboard.writeText(term.getSelection()).catch(() => {});
+    term.clearSelection(); e.preventDefault(); return false;
+  }
+  if (k === 'v') return false;
+  return true;
+});
 
 // ---------- Divider keo doi cao terminal ----------
 const divider = document.getElementById('divider'), termEl = document.getElementById('term');

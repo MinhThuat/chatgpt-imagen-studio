@@ -460,8 +460,8 @@ async def _pty_ws_win(request, ws):
         async for msg in ws:
             if msg.type == WSMsgType.BINARY:
                 d = msg.data.decode("utf-8", "replace")
-                if d.startswith("\x1b[<") or d.startswith("\x1b[M"):
-                    dbg("in", "trinh duyet gui chuot vao PTY: %r" % d[:20])
+                for b in re.findall(r"\x1b\[<(\d+);", d):
+                    dbg("in" + b, "trinh duyet gui chuot vao PTY (nut %s): %r" % (b, d[:20]))
                 proc.write(d)
             elif msg.type == WSMsgType.TEXT:
                 m = json.loads(msg.data)

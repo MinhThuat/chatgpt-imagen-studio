@@ -97,11 +97,6 @@ const fit = new FitAddon.FitAddon();
 term.loadAddon(fit);
 term.open(document.getElementById('term'));
 fit.fit();
-// Chan app (Claude/ConPTY tren Windows) bat che do mouse-tracking: khi bat, xterm gui
-// chuot cho app -> khong boi den duoc text va khong keo duoc thanh cuon ben phai.
-const MOUSE_MODES = new Set([9, 1000, 1001, 1002, 1003, 1005, 1006, 1015, 1016]);
-term.parser.registerCsiHandler({ prefix: '?', final: 'h' },
-  p => p.length > 0 && p.every(x => MOUSE_MODES.has(Array.isArray(x) ? x[0] : x)));
 
 const ws = new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/pty');
 ws.binaryType = 'arraybuffer';

@@ -16,6 +16,7 @@ import asyncio
 import base64
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -433,18 +434,31 @@ async def _pty_ws_win(request, ws):
 
     threading.Thread(target=reader, daemon=True).start()
 
+    # ponytail: log chan doan chuot (Claude tui fullscreen) — go khi da ro loi Windows
+    seen = set()
+
+    def dbg(tag, msg):
+        if tag not in seen:
+            seen.add(tag)
+            print("[studio][mouse] " + msg, flush=True)
+
     async def pty_to_ws():
         while True:
             data = await q.get()
             if not data:  # child da thoat
                 break
+            for m in re.findall(r"\x1b\[\?(100[0-6]|1015|1049)h", data):
+                dbg("out" + m, "app bat che do ?%sh (PTY -> trinh duyet)" % m)
             await ws.send_bytes(data.encode("utf-8", "replace"))
 
     pump = asyncio.ensure_future(pty_to_ws())
     try:
         async for msg in ws:
             if msg.type == WSMsgType.BINARY:
-                proc.write(msg.data.decode("utf-8", "replace"))
+                d = msg.data.decode("utf-8", "replace")
+                if d.startswith("\x1b[<") or d.startswith("\x1b[M"):
+                    dbg("in", "trinh duyet gui chuot vao PTY: %r" % d[:20])
+                proc.write(d)
             elif msg.type == WSMsgType.TEXT:
                 m = json.loads(msg.data)
                 if "resize" in m:

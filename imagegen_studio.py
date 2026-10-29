@@ -415,10 +415,6 @@ async def _pty_ws_win(request, ws):
     proc.spawn(bash, cmdline=" -l", cwd=ROOT,
                env="\0".join("%s=%s" % kv for kv in env.items()) + "\0")
     proc.write(_BOOT)
-    # ConPTY nuot lenh bat chuot (?1002h/?1006h) cua Claude tui fullscreen -> xterm khong
-    # gui click -> khong click chen giua dong duoc. Tu bat san o trinh duyet; ConPTY van
-    # chuyen click vao Claude. Boi den kieu terminal: giu Shift khi keo.
-    await ws.send_bytes(b"\x1b[?1002h\x1b[?1006h")
 
     loop = asyncio.get_event_loop()
     q = asyncio.Queue()
